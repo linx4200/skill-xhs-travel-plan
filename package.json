@@ -1,0 +1,10 @@
+{
+  "name": "skill-xhs-travel-plan",
+  "version": "1.0.0",
+  "description": "Agent skill for Xiaohongshu travel note extraction, planning, and image-card rendering.",
+  "type": "module",
+  "scripts": {
+  },
+  "dependencies": {
+  }
+}
