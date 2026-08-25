@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="reading-first.css">
+</head>
+<body>
+  <h1><%= title %></h1>
+
+  <section>
+    <details open>
+      <summary><h2>每日行程安排</h2></summary>
+      <ol class="timeline">
+<% days.forEach((day) => { -%>
+        <li>
+          <a href="<%= day.href %>"><strong><%= day.title %></strong></a>
+          <p><%= day.summary %></p>
+        </li>
+<% }) -%>
+      </ol>
+    </details>
+  </section>
+
+<% if (cities.length) { -%>
+  <section>
+    <details open>
+      <summary><h2>城市汇总</h2></summary>
+      <ul>
+<% cities.forEach((city) => { -%>
+        <li><a href="<%= city.href %>"><%= city.name %></a>：<%= city.summary %></li>
+<% }) -%>
+      </ul>
+    </details>
+  </section>
+
+<% } -%>
+<% if (globalNotes.length) { -%>
+  <section>
+    <details open>
+      <summary><h2>整体注意事情</h2></summary>
+<% globalNotes.forEach((group) => { -%>
+<% if (group.title) { -%>
+      <h3><%= group.title %></h3>
+<% } -%>
+<%- include("partials/text-list", { items: group.items }) %>
+<% }) -%>
+    </details>
+  </section>
+
+<% } -%>
+<% if (confirmBeforeDeparture.length) { -%>
+  <section>
+    <details open>
+      <summary><h2>出行前确认清单</h2></summary>
+<%- include("partials/text-list", { items: confirmBeforeDeparture }) %>
+    </details>
+  </section>
+
+<% } -%>
+  <p class="meta">生成时间：<%= generatedAt %></p>
+</body>
+</html>

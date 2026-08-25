@@ -1,0 +1,13 @@
+      <ol class="timeline">
+<% items.forEach((item) => { -%>
+        <li>
+          <strong><%= item.label %></strong>
+<% if (item.summary) { -%>
+          <p><%= item.summary %></p>
+<% } -%>
+<% if (item.details.length) { -%>
+<%- include("text-list", { items: item.details, indent: 10 }) %>
+<% } -%>
+        </li>
+<% }) -%>
+      </ol>

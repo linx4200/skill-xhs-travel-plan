@@ -1,0 +1,6 @@
+<% const pad = " ".repeat(typeof indent === "number" ? indent : 6); -%>
+<%- pad %><ul>
+<% items.forEach((item) => { -%>
+<%- pad %>  <li><%= item %></li>
+<% }) -%>
+<%- pad %></ul>

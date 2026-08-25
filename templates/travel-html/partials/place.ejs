@@ -1,0 +1,34 @@
+      <section>
+        <details open>
+          <summary><h3><%= place.name %></h3></summary>
+<% if (place.summary) { -%>
+          <p><%= place.summary %></p>
+<% } -%>
+<% place.groups.forEach((group) => { -%>
+          <h4><%= group.title %></h4>
+<%- include("text-list", { items: group.items, indent: 10 }) %>
+<% }) -%>
+<% if (place.duration) { -%>
+          <h4>建议游玩时长</h4>
+          <p><%= place.duration %></p>
+<% } -%>
+<% if (place.photos.length) { -%>
+          <h4>照片</h4>
+<% if (place.photos.length === 1) { -%>
+          <figure class="photo">
+            <img src="<%= place.photos[0].src %>" alt="<%= place.photos[0].alt %>" loading="lazy">
+            <figcaption><%= place.photos[0].caption %></figcaption>
+          </figure>
+<% } else { -%>
+          <div class="photo-grid">
+<% place.photos.forEach((photo) => { -%>
+            <figure class="photo">
+              <img src="<%= photo.src %>" alt="<%= photo.alt %>" loading="lazy">
+              <figcaption><%= photo.caption %></figcaption>
+            </figure>
+<% }) -%>
+          </div>
+<% } -%>
+<% } -%>
+        </details>
+      </section>
