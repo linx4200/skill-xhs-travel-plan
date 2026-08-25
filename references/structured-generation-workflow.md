@@ -164,8 +164,11 @@ node scripts/create_fact_workspace.mjs \
 填好 `facts-workspace.json` 后运行：
 
 ```bash
+npm install
 node scripts/render_travel_html.mjs <工作目录>/facts-workspace.json -o <输出目录>
 ```
+
+如果当前仓库已经安装过依赖，可以直接运行渲染命令。
 
 渲染脚本会：
 

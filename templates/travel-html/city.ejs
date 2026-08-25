@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="reading-first.css">
+</head>
+<body>
+  <h1><%= title %></h1>
+
+  <nav class="page-nav" aria-label="页面导航">
+    <a href="index.html">返回首页</a>
+  </nav>
+
+<% if (overview.length) { -%>
+  <section>
+    <details open>
+      <summary><h2>城市概览</h2></summary>
+<% overview.forEach((text) => { -%>
+      <p><%= text %></p>
+<% }) -%>
+    </details>
+  </section>
+
+<% } -%>
+<% groups.forEach((group) => { -%>
+  <section>
+    <details open>
+      <summary><h2><%= group.title %></h2></summary>
+<%- include("partials/text-list", { items: group.items }) %>
+    </details>
+  </section>
+
+<% }) -%>
+</body>
+</html>

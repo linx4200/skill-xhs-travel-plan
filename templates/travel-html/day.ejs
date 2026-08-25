@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="reading-first.css">
+</head>
+<body>
+  <h1><%= title %></h1>
+
+<%- include("partials/nav", { links: navLinks }) %>
+
+<% if (timeline.length) { -%>
+  <section>
+    <details open>
+      <summary><h2>当日行程安排</h2></summary>
+<%- include("partials/timeline", { items: timeline }) %>
+    </details>
+  </section>
+
+<% } -%>
+<% if (places.length) { -%>
+  <section>
+    <details open>
+      <summary><h2>当日景点详细信息</h2></summary>
+<% places.forEach((place) => { -%>
+<%- include("partials/place", { place }) %>
+<% }) -%>
+    </details>
+  </section>
+
+<% } -%>
+<% if (notes.length) { -%>
+  <section>
+    <details open>
+      <summary><h2>当日注意事项/确认事项</h2></summary>
+<%- include("partials/text-list", { items: notes }) %>
+    </details>
+  </section>
+
+<% } -%>
+<%- include("partials/nav", { links: navLinks }) %>
+</body>
+</html>

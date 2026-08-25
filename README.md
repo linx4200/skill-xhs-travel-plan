@@ -6,6 +6,7 @@
 完整 HTML 攻略优先走结构化流程，减少反复读取素材和手写 HTML：
 
 ```bash
+npm install
 node scripts/scan_resources.mjs <输入材料文件夹> -o <工作目录>/resource-index.json --place <景点名>
 node scripts/create_fact_workspace.mjs --route-json <工作目录>/route-structure.json --index <工作目录>/resource-index.json -o <工作目录>/facts-workspace.json
 node scripts/render_travel_html.mjs <工作目录>/facts-workspace.json -o <输出目录>
