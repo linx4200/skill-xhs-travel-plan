@@ -1,6 +1,6 @@
 ---
 name: skill-xhs-travel-plan
-description: 根据用户提供的旅行路线和本地材料，生成中文旅游攻略与适合移动端阅读的静态 HTML 页面；除非用户明确授权联网，否则只使用用户提供的材料。
+description: Use when 用户希望根据已有资料生成旅游攻略；根据用户提供的旅行路线和本地材料，生成中文旅游攻略与适合移动端阅读的静态 HTML 页面；
 metadata:
   short-description: 本地材料生成移动端旅游攻略
 ---
@@ -15,22 +15,28 @@ metadata:
 
 当满足以下任一条件时，还必须读取 [references/structured-generation-workflow.md](references/structured-generation-workflow.md)，并优先使用其中的 `resource-index.json`、`facts-workspace.json`、渲染脚本和校验脚本流程：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、用户需要完整静态 HTML 攻略、或用户希望后续可重复修改。
 
-页面视觉语言沿用 [reading-first-design-spec.md](reading-first-design-spec.md) 和 [reading-first.css](reading-first.css)。HTML 必须外链 `reading-first.css`，不要内联 CSS。
+页面视觉语言沿用 [reading-first-design-spec.md](references/reading-first-design-spec.md) 和 [reading-first.css](templates/travel-html/reading-first.css)。
 
-## 低上下文生成原则
+## 处理流程
 
-生成完整攻略时，不要默认把所有素材全文、页面规范和 HTML 草稿同时塞进上下文。优先把工作拆成四个阶段：
+生成完整攻略时，不要默认把所有素材全文、页面规范和 HTML 草稿同时塞进上下文。优先使用低上下文的结构化流程；材料很少时可直接整理，但仍要遵守资料边界。
 
-1. 先从用户路线规划中提取明确出现的真实景点/景区名称，排除城市名、住宿点、停车场、游客中心、入口、车站、餐厅等非景点设施。运行素材索引脚本时，把每个景点/景区名称作为一个独立的 `--place` 参数传入。
-2. 用 `node scripts/scan_resources.mjs` 扫描输入材料，生成 `resource-index.json`。这个索引只做文件统计、短摘录、照片目录识别和候选关键词匹配，不代表已经完成事实抽取。
+1. 解析用户路线规划，提取每天的日期、城市、景点和活动；从路线中提取明确出现的真实景点/景区名称，排除城市名、住宿点、停车场、游客中心、入口、车站、餐厅等非景点设施。
+2. 用 `node scripts/scan_resources.mjs` 扫描输入材料，生成 `resource-index.json`。运行素材索引脚本时，把每个景点/景区名称作为一个独立的 `--place` 参数传入。这个索引只做文件统计、短摘录、照片目录识别和候选关键词匹配，不代表已经完成事实抽取。
 3. 由 agent 读取用户原始路线，生成 `route-structure.json`，再用 `node scripts/create_fact_workspace.mjs` 根据结构化路线和索引生成 `facts-workspace.json` 工作区。路线解析不要交给脚本用正则完成。
    - `route-structure.json.days`：由 agent 提取每天的 `day`、`date`、`title`、`route_places`、`source_line` 等字段；`route_places` 只放真实景点/景区。
    - `route-structure.json.mode`：只根据用户明确说明的出行方式填写，例如 `self-drive`、`rail`、`charter`、`public-transit`、`walking`；未明确说明时填 `unknown`，不要默认成自驾。
    - `route-structure.json.cities`：从路线中的城市、住宿地、中转地或连续游玩基地提取候选城市名；不要放景点名、停车场、游客中心、餐厅或酒店名。
 4. 只读取与当前景点、城市或冲突判断相关的原文，由 agent 把事实、照片和城市页取舍填入 `facts-workspace.json`。
-5. 用 `node scripts/render_travel_html.mjs` 生成页面，再用 `node scripts/verify_output.mjs` 校验。
+5. 按天聚合行程，整理路线顺序、当天关键执行提醒和对应景点信息。
+6. 按景点聚合信息，只处理用户行程线路中明确出现的真实景点/景区；景点详情拆入对应 `day-XX.html`，不要在首页生成集中“景点汇总”。
+7. 按城市聚合信息，排除已在每日详情、整体准备或确认清单中完整出现过的内容，再判断城市是否有独立增量价值；只有通过判断的城市才生成 `city-XX.html`。结构化流程中用 `cities.<城市名>.include` 固化这个判断。
+8. 整理跨天共用的准备事项、风险、衣物、天气、海拔、文化习俗、安全提醒、预约和出行前确认。
+9. 按 [references/mobile-reading-html-output.md](references/mobile-reading-html-output.md) 生成静态 HTML 文件；使用结构化流程时由 `node scripts/render_travel_html.mjs` 渲染，再用 `node scripts/verify_output.mjs` 校验。
 
 后续修改内容时，优先改 `facts-workspace.json` 后重新渲染；只有 HTML 结构规则变化时才改渲染脚本。命令输出应保持简短，只显示统计、异常和必要样例，避免把大段素材打印到对话里。
+
+优先输出可执行的旅行建议，删除套话、空话、重复信息和低价值占位内容。攻略应像给人看的执行清单，不要写成资料审计报告。
 
 ## 资料边界
 
@@ -74,18 +80,6 @@ metadata:
 必须区分“景点/景区”和“交通点/设施/到达点”。停车场、游客中心、售票处、入口、公交站、码头、酒店、餐厅等不要作为独立景点标题；如果它们与某个景点相关，应放进该景点的交通、到达、停车、购票或实用提醒中。
 
 成文时直接陈述整理后的事实和判断，不要使用 `材料指出`、`材料中的`、`材料还提到` 这类旁白式来源表述。
-
-## 处理流程
-
-1. 解析用户路线规划，提取每天的日期、城市、景点和活动。
-2. 建立素材索引和事实工作区；材料很少时可直接整理，但仍要遵守资料边界。
-3. 按天聚合行程，整理路线顺序、当天关键执行提醒和对应景点信息。
-4. 按景点聚合信息，只处理用户行程线路中明确出现的真实景点/景区；景点详情拆入对应 `day-XX.html`，不要在首页生成集中“景点汇总”。
-5. 按城市聚合信息，排除已在每日详情、整体准备或确认清单中完整出现过的内容，再判断城市是否有独立增量价值；只有通过判断的城市才生成 `city-XX.html`。结构化流程中用 `cities.<城市名>.include` 固化这个判断。
-6. 整理跨天共用的准备事项、风险、衣物、天气、海拔、文化习俗、安全提醒、预约和出行前确认。
-7. 按 [references/mobile-reading-html-output.md](references/mobile-reading-html-output.md) 生成静态 HTML 文件；使用结构化流程时由 `node scripts/render_travel_html.mjs` 渲染。
-
-优先输出可执行的旅行建议，删除套话、空话、重复信息和低价值占位内容。攻略应像给人看的执行清单，不要写成资料审计报告。
 
 ## 景点规则
 
