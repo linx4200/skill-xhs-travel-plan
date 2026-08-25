@@ -6,15 +6,15 @@
 
 ## 阶段 1：建立素材索引
 
-运行索引脚本前，agent 先从用户路线规划中提取明确出现的真实景点/景区名称，并排除城市名、住宿点、停车场、游客中心、入口、车站、餐厅等非景点设施。每个景点/景区名称都作为一个独立的 `--place` 参数传给脚本。
+运行索引脚本前，agent 先从用户路线规划中提取明确出现的真实景点/景区名称和候选城市，并排除住宿点、停车场、游客中心、入口、车站、餐厅等非景点设施。每个景点/景区名称都作为一个独立的 `--place` 参数传给脚本；每个候选城市都作为一个独立的 `--city` 参数传给脚本。不要把城市名塞进 `--place`。
 
 运行：
 
 ```bash
-node scripts/scan_resources.mjs <输入材料文件夹> -o <工作目录>/resource-index.json --place <行程景点名>
+node scripts/scan_resources.mjs <输入材料文件夹> -o <工作目录>/resource-index.json --place <行程景点名> --city <候选城市名>
 ```
 
-可以重复传入 `--place`。例如路线包含“兴文石海、九洞天、百草坪、草海”时，命令应拼成：
+可以重复传入 `--place` 和 `--city`。例如路线包含“兴文石海、九洞天、百草坪、草海、大山包、豆沙关古镇”，候选城市包含“宜宾、毕节、威宁、昭通、盐津县、乐山”时，命令应拼成：
 
 ```bash
 node scripts/scan_resources.mjs <输入材料文件夹> \
@@ -22,12 +22,20 @@ node scripts/scan_resources.mjs <输入材料文件夹> \
   --place 兴文石海 \
   --place 九洞天 \
   --place 百草坪 \
-  --place 草海
+  --place 草海 \
+  --place 大山包 \
+  --place 豆沙关古镇 \
+  --city 宜宾 \
+  --city 毕节 \
+  --city 威宁 \
+  --city 昭通 \
+  --city 盐津县 \
+  --city 乐山
 ```
 
 脚本会扫描 `.json`、`.md`、`.txt` 和 `photos/`，输出：
 
-- 文本文件路径、标题、正文长度、命中的景点/实用关键词、短摘录。
+- 文本文件路径、标题、正文长度、命中的景点、城市、实用关键词和短摘录。
 - `photos/景点名/` 下的本地照片列表。
 
 使用索引决定下一步读取哪些原文。不要把大段素材直接打印进对话；只输出统计、异常和少量必要片段。
@@ -74,7 +82,7 @@ node scripts/create_fact_workspace.mjs \
   -o <工作目录>/facts-workspace.json
 ```
 
-这个脚本只创建结构化工作区，不会自行补事实。随后 agent 读取 `facts-workspace.json` 中每个地点的 `source_files`，只打开与该景点或城市相关的原文，填充事实字段。
+这个脚本只创建结构化工作区，不会自行补事实。随后 agent 读取 `facts-workspace.json` 中每个景点和城市的 `source_files`，只打开与该景点或城市相关的原文，填充事实字段。景点 `source_files` 来自 `candidate_places`，城市 `source_files` 来自 `candidate_cities`；文件路径或标题命中只作为兜底。
 
 ## facts-workspace.json 约定
 

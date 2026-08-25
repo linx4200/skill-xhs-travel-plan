@@ -285,8 +285,11 @@ function prepareCity(name, data) {
  */
 function render(facts, outDir, skillRoot) {
   fs.mkdirSync(outDir, { recursive: true });
-  const cssSource = path.join(skillRoot, "reading-first.css");
-  if (fs.existsSync(cssSource)) fs.copyFileSync(cssSource, path.join(outDir, "reading-first.css"));
+  const cssSource = path.join(skillRoot, "templates", "travel-html", "reading-first.css");
+  if (!fs.existsSync(cssSource)) {
+    throw new Error(`Missing template stylesheet: ${cssSource}`);
+  }
+  fs.copyFileSync(cssSource, path.join(outDir, "reading-first.css"));
   let resourceRoot = facts.source?.resource_root || ".";
   if (!path.isAbsolute(resourceRoot)) resourceRoot = path.resolve(skillRoot, resourceRoot);
 

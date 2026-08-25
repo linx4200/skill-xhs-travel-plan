@@ -1,4 +1,4 @@
 interface:
-  display_name: "XHS Travel Plan"
-  short_description: "小红书旅行笔记整理与图片卡片生成"
-  default_prompt: "Use $skill-xhs-travel-plan to turn these Xiaohongshu travel notes into a practical itinerary and Xiaohongshu-ready post."
+  display_name: "Travel Plan HTML"
+  short_description: "本地材料生成移动端旅游攻略 HTML"
+  default_prompt: "Use $skill-xhs-travel-plan to turn my local travel notes, route, and photos into a practical Chinese mobile HTML itinerary."

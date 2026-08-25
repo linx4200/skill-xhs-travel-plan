@@ -28,16 +28,18 @@ const UTILITY_KEYWORDS = [
 ];
 
 /**
- * 解析命令行参数，得到素材目录、输出路径和显式传入的景点名列表。
+ * 解析命令行参数，得到素材目录、输出路径和显式传入的景点名/城市名列表。
  */
 function parseArgs(argv) {
-  const args = { places: [], out: "resource-index.json", resourceDir: "" };
+  const args = { places: [], cities: [], out: "resource-index.json", resourceDir: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "-o" || arg === "--out") {
       args.out = argv[++i];
     } else if (arg === "--place") {
       args.places.push(argv[++i]);
+    } else if (arg === "--city") {
+      args.cities.push(argv[++i]);
     } else if (!args.resourceDir) {
       args.resourceDir = arg;
     } else {
@@ -45,7 +47,7 @@ function parseArgs(argv) {
     }
   }
   if (!args.resourceDir) {
-    throw new Error("Usage: node scripts/scan_resources.mjs <resource_dir> [-o resource-index.json] [--place 景点名]");
+    throw new Error("Usage: node scripts/scan_resources.mjs <resource_dir> [-o resource-index.json] [--place 景点名] [--city 城市名]");
   }
   return args;
 }
@@ -162,6 +164,14 @@ function collectPlaces(root, explicitPlaces) {
 }
 
 /**
+ * 清理并排序城市候选词；城市不混入景点候选字段。
+ */
+function collectCities(explicitCities) {
+  const cities = new Set(explicitCities.map((city) => city.trim()).filter(Boolean));
+  return [...cities].sort((a, b) => b.length - a.length || a.localeCompare(b, "zh-CN"));
+}
+
+/**
  * 扫描 photos/ 目录，把本地照片按景点目录归属整理成索引。
  */
 function scanPhotos(root) {
@@ -182,9 +192,10 @@ function scanPhotos(root) {
 /**
  * 扫描输入材料目录，输出文本素材索引、候选关键词匹配和照片索引。
  */
-function scan(resourceDir, explicitPlaces) {
+function scan(resourceDir, explicitPlaces, explicitCities) {
   const root = path.resolve(resourceDir);
   const places = collectPlaces(root, explicitPlaces);
+  const cities = collectCities(explicitCities);
   const files = [];
 
   for (const filePath of walk(root)) {
@@ -192,14 +203,16 @@ function scan(resourceDir, explicitPlaces) {
     const text = decodeText(filePath);
     const rel = toPosix(path.relative(root, filePath));
     const matchedPlaces = places.filter((place) => place && (text.includes(place) || rel.includes(place)));
+    const matchedCities = cities.filter((city) => city && (text.includes(city) || rel.includes(city)));
     const matchedKeywords = UTILITY_KEYWORDS.filter((word) => text.includes(word));
     files.push({
       path: rel,
       title: guessTitle(filePath, text),
       kind: kindFor(filePath),
       char_count: text.length,
-      keywords: [...new Set([...matchedPlaces, ...matchedKeywords])].sort((a, b) => a.localeCompare(b, "zh-CN")),
+      keywords: [...new Set([...matchedPlaces, ...matchedCities, ...matchedKeywords])].sort((a, b) => a.localeCompare(b, "zh-CN")),
       candidate_places: matchedPlaces,
+      candidate_cities: matchedCities,
       excerpt: compactExcerpt(text),
     });
   }
@@ -216,7 +229,7 @@ function scan(resourceDir, explicitPlaces) {
  */
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const index = scan(args.resourceDir, args.places);
+  const index = scan(args.resourceDir, args.places, args.cities);
   fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
   fs.writeFileSync(args.out, `${JSON.stringify(index, null, 2)}\n`, "utf8");
   const photoCount = Object.values(index.photos).reduce((sum, items) => sum + items.length, 0);
