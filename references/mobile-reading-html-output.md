@@ -211,7 +211,7 @@
 
 ## 城市详情页结构
 
-只有通过 `SKILL.md` 中“独立增量价值”判断的城市才生成 `city-XX.html`。首页城市汇总只放城市列表和一句话摘要，具体内容放到城市详情页。
+只有通过 [info-rules.md](info-rules.md) 和 [structured-generation-workflow.md](structured-generation-workflow.md) 中“独立增量价值”判断的城市才生成 `city-XX.html`。首页城市汇总只放城市列表和一句话摘要，具体内容放到城市详情页。
 
 每个 `city-XX.html` 按以下顺序输出：
 

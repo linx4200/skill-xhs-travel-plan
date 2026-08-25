@@ -1,9 +1,13 @@
 {
   "name": "skill-xhs-travel-plan",
   "version": "1.0.0",
-  "description": "Agent skill for Xiaohongshu travel note extraction, planning, and image-card rendering.",
+  "description": "Agent skill for generating Chinese mobile travel-guide HTML from local route notes and photos.",
   "type": "module",
   "scripts": {
+    "scan": "node scripts/scan_resources.mjs",
+    "create-workspace": "node scripts/create_fact_workspace.mjs",
+    "render": "node scripts/render_travel_html.mjs",
+    "verify": "node scripts/verify_output.mjs"
   },
   "dependencies": {
     "ejs": "^6.0.1"

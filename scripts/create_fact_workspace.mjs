@@ -77,12 +77,25 @@ function normalizeDays(routeStructure) {
 }
 
 /**
- * 根据候选地点名，从素材索引中找出可能相关的原始素材文件路径。
+ * 根据候选景点名，从素材索引中找出可能相关的原始素材文件路径。
  */
 function filesForPlace(index, place) {
   const matches = [];
   for (const item of index.files ?? []) {
     if ((item.candidate_places ?? []).includes(place) || item.path?.includes(place) || item.title?.includes(place)) {
+      matches.push(item.path);
+    }
+  }
+  return matches;
+}
+
+/**
+ * 根据候选城市名，从素材索引中找出可能相关的原始素材文件路径。
+ */
+function filesForCity(index, city) {
+  const matches = [];
+  for (const item of index.files ?? []) {
+    if ((item.candidate_cities ?? []).includes(city) || item.path?.includes(city) || item.title?.includes(city)) {
       matches.push(item.path);
     }
   }
@@ -139,7 +152,7 @@ function buildFacts(index, routeStructure) {
       transport: [],
       shopping: [],
       notes: [],
-      source_files: filesForPlace(index, city),
+      source_files: filesForCity(index, city),
     };
   }
 
