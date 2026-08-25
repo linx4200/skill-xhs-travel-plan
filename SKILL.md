@@ -13,7 +13,24 @@ metadata:
 
 生成静态 HTML 攻略时，必须先读取 [references/mobile-reading-html-output.md](references/mobile-reading-html-output.md)。
 
+当满足以下任一条件时，还必须读取 [references/structured-generation-workflow.md](references/structured-generation-workflow.md)，并优先使用其中的 `resource-index.json`、`facts-workspace.json`、渲染脚本和校验脚本流程：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、用户需要完整静态 HTML 攻略、或用户希望后续可重复修改。
+
 页面视觉语言沿用 [reading-first-design-spec.md](reading-first-design-spec.md) 和 [reading-first.css](reading-first.css)。HTML 必须外链 `reading-first.css`，不要内联 CSS。
+
+## 低上下文生成原则
+
+生成完整攻略时，不要默认把所有素材全文、页面规范和 HTML 草稿同时塞进上下文。优先把工作拆成四个阶段：
+
+1. 先从用户路线规划中提取明确出现的真实景点/景区名称，排除城市名、住宿点、停车场、游客中心、入口、车站、餐厅等非景点设施。运行素材索引脚本时，把每个景点/景区名称作为一个独立的 `--place` 参数传入。
+2. 用 `node scripts/scan_resources.mjs` 扫描输入材料，生成 `resource-index.json`。这个索引只做文件统计、短摘录、照片目录识别和候选关键词匹配，不代表已经完成事实抽取。
+3. 由 agent 读取用户原始路线，生成 `route-structure.json`，再用 `node scripts/create_fact_workspace.mjs` 根据结构化路线和索引生成 `facts-workspace.json` 工作区。路线解析不要交给脚本用正则完成。
+   - `route-structure.json.days`：由 agent 提取每天的 `day`、`date`、`title`、`route_places`、`source_line` 等字段；`route_places` 只放真实景点/景区。
+   - `route-structure.json.mode`：只根据用户明确说明的出行方式填写，例如 `self-drive`、`rail`、`charter`、`public-transit`、`walking`；未明确说明时填 `unknown`，不要默认成自驾。
+   - `route-structure.json.cities`：从路线中的城市、住宿地、中转地或连续游玩基地提取候选城市名；不要放景点名、停车场、游客中心、餐厅或酒店名。
+4. 只读取与当前景点、城市或冲突判断相关的原文，由 agent 把事实、照片和城市页取舍填入 `facts-workspace.json`。
+5. 用 `node scripts/render_travel_html.mjs` 生成页面，再用 `node scripts/verify_output.mjs` 校验。
+
+后续修改内容时，优先改 `facts-workspace.json` 后重新渲染；只有 HTML 结构规则变化时才改渲染脚本。命令输出应保持简短，只显示统计、异常和必要样例，避免把大段素材打印到对话里。
 
 ## 资料边界
 
@@ -61,11 +78,12 @@ metadata:
 ## 处理流程
 
 1. 解析用户路线规划，提取每天的日期、城市、景点和活动。
-2. 按天聚合行程，整理路线顺序、当天关键执行提醒和对应景点信息。
-3. 按景点聚合信息，只处理用户行程线路中明确出现的真实景点/景区；景点详情拆入对应 `day-XX.html`，不要在首页生成集中“景点汇总”。
-4. 按城市聚合信息，排除已在每日详情、整体准备或确认清单中完整出现过的内容，再判断城市是否有独立增量价值；只有通过判断的城市才生成 `city-XX.html`。
-5. 整理跨天共用的准备事项、风险、衣物、天气、海拔、文化习俗、安全提醒、预约和出行前确认。
-6. 按 [references/mobile-reading-html-output.md](references/mobile-reading-html-output.md) 生成静态 HTML 文件。
+2. 建立素材索引和事实工作区；材料很少时可直接整理，但仍要遵守资料边界。
+3. 按天聚合行程，整理路线顺序、当天关键执行提醒和对应景点信息。
+4. 按景点聚合信息，只处理用户行程线路中明确出现的真实景点/景区；景点详情拆入对应 `day-XX.html`，不要在首页生成集中“景点汇总”。
+5. 按城市聚合信息，排除已在每日详情、整体准备或确认清单中完整出现过的内容，再判断城市是否有独立增量价值；只有通过判断的城市才生成 `city-XX.html`。结构化流程中用 `cities.<城市名>.include` 固化这个判断。
+6. 整理跨天共用的准备事项、风险、衣物、天气、海拔、文化习俗、安全提醒、预约和出行前确认。
+7. 按 [references/mobile-reading-html-output.md](references/mobile-reading-html-output.md) 生成静态 HTML 文件；使用结构化流程时由 `node scripts/render_travel_html.mjs` 渲染。
 
 优先输出可执行的旅行建议，删除套话、空话、重复信息和低价值占位内容。攻略应像给人看的执行清单，不要写成资料审计报告。
 
@@ -94,34 +112,9 @@ metadata:
 
 城市汇总不是每个城市必写。只有排除重复内容后仍有独立、具体、可执行的信息，才在首页城市汇总中列出该城市，并生成对应城市详情页。
 
-先排除以下内容：
+使用结构化流程时，城市页是否生成由 `facts-workspace.json` 中的 `cities.<城市名>.include` 固化；完整判断标准和字段填写规则见 [references/structured-generation-workflow.md](references/structured-generation-workflow.md) 的“城市 include 判断”。
 
-- 已经在当天安排、每日景点详情、整体准备或出行前确认中写过的信息。
-- 只是说明城市角色的句子，例如“这里是出发地”“这里是住宿地”“这里是某景点所在地”。
-- 只有景点名字，但没有具体介绍、玩法、交通、注意事项的信息。
-- 需要大幅改变当前路线或住宿安排才成立的建议。
-- 只有 `材料未说明` 或 `具体玩法未说明` 的内容。
-- 纯粹为了凑城市章节而写的概览、餐饮、住宿、交通空话。
-
-排除后，满足以下任一条件，才输出城市章节：
-
-- 至少有 2 类对行程有用的城市级信息，例如明确美食、住宿区域、停车/交通风险、天气/海拔提醒、备选景点库。
-- 至少有 2 个可作为备选的城市景点，且每个都有具体介绍。
-- 该城市承担住宿、中转或连续游玩基地功能，且材料提供了具体住宿、停车、补给或交通信息。
-- 有明确城市级风险会影响执行，例如山路、夜间驾驶、停车困难、高反、温差、限行、景区分散等。
-
-通过判断后，只写对本次行程有帮助、且材料中有实质内容的信息：
-
-- 首页城市汇总：每个城市只写 1 句话摘要，并链接到 `city-XX.html`。
-- 城市概览：用 1-3 句话总结这个城市在本次行程中的角色。
-- 备选景点库：排除每日景点详情中已经完整出现过的景点及其附属到达点，再列出输入材料中该城市出现过的其余景点；只介绍景点本身，不评价它是否应该加入本次行程。
-- 美食：整理材料中出现的餐厅、菜品、夜市、小吃、避坑餐饮。
-- 住宿建议：整理材料中提到的推荐区域、酒店、民宿、交通便利性和注意事项。
-- 城市交通：只列出符合用户出行方式的信息。
-- 购物或伴手礼：仅整理材料中出现的信息。
-- 城市级注意事项：天气、海拔、治安、支付、排队、节假日人流、文化习俗等。
-
-没有实质内容的小节直接删除。
+不使用结构化流程时，也沿用同一判断标准：不要为了凑城市页重复每日景点详情、写空泛城市概览、或输出只有 `材料未说明` 的城市章节。
 
 ## 整体旅程规则
 
@@ -138,27 +131,9 @@ metadata:
 
 ## HTML 输出规则
 
-生成 HTML 时，在用户指定的输出目录保存完整静态文件；如果用户未指定输出目录，默认保存在当前目录。
+生成 HTML 时，页面结构、文件命名、互链、timeline、折叠状态、照片输出和禁用资源规则必须遵守 [references/mobile-reading-html-output.md](references/mobile-reading-html-output.md)。
 
-必须生成：
-
-- `index.html`。
-- 每天一个详情页：`day-01.html`、`day-02.html` 等。
-- 只为通过独立增量价值判断的城市生成：`city-01.html`、`city-02.html` 等。
-
-页面要求：
-
-- 所有页面外链 `reading-first.css`，不要内联 CSS。
-- 不要引入 JavaScript、外部字体、图标库、地图 iframe、远程图片或远程资源。
-- 首页不要输出独立的 `nav.page-nav`。
-- 首页每日行程 timeline 每天只保留链接标题和一句摘要，不输出 `ul` 详情列表；当天细节放到对应 `day-XX.html`。
-- 首页城市汇总只列出通过独立增量价值判断的城市，并链接到城市详情页。
-- 首页末尾必须用小字输出 HTML 生成时间：`生成时间：YYYY-MM-DD HH:mm`；每日详情页和城市详情页不重复。
-- 每日详情页顶部和底部都有返回首页导航，并尽量提供上一天/下一天链接。
-- 照片复制到输出目录 `assets/photos/景点名/`，只展示在对应每日景点详情下。
-- 没有照片的景点不输出照片区域；不要使用占位图、远程图、其他景点照片或首页照片。
-
-页面结构、文件命名、互链、timeline、折叠状态和照片 HTML 必须遵守 [references/mobile-reading-html-output.md](references/mobile-reading-html-output.md)。
+结构化流程中由 `node scripts/render_travel_html.mjs` 负责渲染文件，再用 `node scripts/verify_output.mjs` 校验输出。非结构化手写 HTML 时也必须沿用同一 reference。
 
 ## 餐饮规则
 
@@ -166,17 +141,14 @@ metadata:
 
 材料中有明确餐厅、菜品、用餐点或避坑信息时，只放入城市“美食”中。
 
-## 质量检查
+## 人工质量检查
 
-输出前检查：
+输出前人工检查：
 
 - 是否只使用了用户提供或明确授权的材料。
 - 是否覆盖了用户路线中的每个城市和景点。
-- 是否生成 `index.html` 和每一天对应的 `day-XX.html`。
 - 是否只为通过独立增量价值判断的城市生成 `city-XX.html`。
 - 首页是否只包含总览信息，没有集中输出长篇“景点汇总”。
-- 首页是否没有独立的 `nav.page-nav`。
-- 首页末尾是否有 `生成时间：YYYY-MM-DD HH:mm`。
 - 每日景点详情标题是否只包含真实景点/景区，没有把停车场、游客中心、入口等设施拼进标题。
 - 每日景点详情是否只包含用户路线中的景点。
 - 城市详情页备选景点库是否已排除每日景点详情中完整出现过的地点。
@@ -187,7 +159,8 @@ metadata:
 - 是否对冲突信息做了并列说明。
 - 是否删除重复内容、套话、资料来源说明、弱相关背景和空小节。
 - 当天行程安排中是否没有餐饮安排，除非用户明确要求。
-- HTML 标签是否闭合，页面互链是否完整，所有页面是否都链接 `reading-first.css`。
+
+HTML 文件存在性、互链、CSS、首页导航、生成时间、远程资源和图片路径等机械检查由结构化流程中的 `node scripts/verify_output.mjs` 执行；详见 [references/structured-generation-workflow.md](references/structured-generation-workflow.md) 的“阶段 4：校验输出”。
 
 ## 禁止事项
 
