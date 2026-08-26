@@ -38,7 +38,7 @@
 - `days[].date`：用户路线给出的日期；没有日期可留空。
 - `days[].title`：当天标题，概括城市和主要路线。
 - `days[].summary`：当天概览，可先留空，后续填入执行重点。
-- `days[].route_places`：当天真实景点/景区名称数组；必须排除城市名、住宿点、停车场、游客中心、入口、车站、码头、餐厅、酒店等非景点设施。
+- `days[].route_places`：当天真实游玩或短停地点名称数组。通常是景点/景区，也可以是用户明确安排游玩的古镇、县城老城、街区、观景台或村镇；必须排除只承担出发、住宿、中转或行政定位作用的城市名，以及停车场、游客中心、入口、车站、码头、餐厅、酒店等设施或普通导航点。
 - `days[].timeline`：当天行程顺序，可先留空，后续按事实整理。
 - `days[].notes`：当天特有提醒。
 - `days[].confirmations`：当天出发前或到达前必须确认的事项。
@@ -59,7 +59,7 @@
 - `files[].candidate_places`：命中的候选景点名，来自 `route-structure.json`、显式 `--place` 或照片目录。
 - `files[].candidate_cities`：命中的候选城市名，来自 `route-structure.json` 或显式 `--city`。
 - `files[].excerpt`：短摘录，只用于判断是否需要打开原文。
-- `photos`：按 `photos/景点名/` 目录归属整理的本地照片路径。
+- `photos`：按 `photos/地点名/` 或 `photos/地点别名/` 目录归属整理的本地照片路径。
 
 ## facts-workspace.json
 
@@ -75,7 +75,7 @@
 - `source.route_structure`：路线结构文件名。
 - `trip.mode`：出行方式。
 - `trip.days`：每日路线、摘要、timeline、当天提醒。
-- `places`：用户路线中真实景点/景区的事实。
+- `places`：用户路线中 `route_places` 地点的事实；每个 `route_places` 都应有对应 key。
 - `cities`：城市级信息；只有通过独立增量价值判断时才把 `include` 设为 `true`。
 - `global_notes`：跨天通用注意事项；可为列表，也可为 `{小节名: [事项]}`。
 - `confirm_before_departure`：真正需要出发前确认、预约、购票、核验开放状态或准备的事项。

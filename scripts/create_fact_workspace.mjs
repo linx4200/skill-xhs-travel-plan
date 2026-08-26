@@ -51,6 +51,41 @@ function uniqueStrings(values) {
   return result;
 }
 
+// skill 作者按：感觉没啥必要。
+/**
+ * 生成地点名的轻量别名，用于把“盐津县城”匹配到 photos/盐津/，
+ * 或把“九洞天景区”匹配到 photos/九洞天/。这里只做保守名称归一，
+ * 语义取舍仍由 agent 复核。
+ */
+function placeAliases(name) {
+  const source = String(name ?? "").trim();
+  if (!source) return [];
+  const aliases = new Set([source]);
+  let stripped = source;
+  for (const suffix of ["风景名胜区", "风景区", "旅游区", "国家公园", "景区", "古镇", "县城", "老城", "城区", "市区"]) {
+    if (stripped.endsWith(suffix) && stripped.length > suffix.length) {
+      stripped = stripped.slice(0, -suffix.length);
+      aliases.add(stripped);
+    }
+  }
+  if (stripped.endsWith("县") && stripped.length > 2) aliases.add(stripped.slice(0, -1));
+  if (stripped.endsWith("市") && stripped.length > 2) aliases.add(stripped.slice(0, -1));
+  return [...aliases].filter((alias) => alias.length >= 2);
+}
+
+/**
+ * 判断两个地点名称是否足够明确地同指。允许一个名称包含另一个名称，
+ * 以覆盖“昭通大山包”与“大山包”这类材料目录简写。
+ */
+function relatedPlaceName(left, right) {
+  for (const a of placeAliases(left)) {
+    for (const b of placeAliases(right)) {
+      if (a === b || a.includes(b) || b.includes(a)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * 规范单日路线对象，确保工作区中的每日字段稳定存在。
  */
@@ -82,7 +117,10 @@ function normalizeDays(routeStructure) {
 function filesForPlace(index, place) {
   const matches = [];
   for (const item of index.files ?? []) {
-    if ((item.candidate_places ?? []).includes(place) || item.path?.includes(place) || item.title?.includes(place)) {
+    const candidateMatch = (item.candidate_places ?? []).some((candidate) => relatedPlaceName(place, candidate));
+    const pathMatch = placeAliases(place).some((alias) => item.path?.includes(alias));
+    const titleMatch = placeAliases(place).some((alias) => item.title?.includes(alias));
+    if (candidateMatch || pathMatch || titleMatch) {
       matches.push(item.path);
     }
   }
@@ -116,6 +154,17 @@ function routePlacesFromDays(days) {
 }
 
 /**
+ * 根据路线地点名匹配本地照片目录。优先 exact，也允许明显别名。
+ */
+function photosForPlace(index, place) {
+  const photos = [];
+  for (const [photoPlace, items] of Object.entries(index.photos ?? {})) {
+    if (relatedPlaceName(place, photoPlace)) photos.push(...items);
+  }
+  return uniqueStrings(photos).slice(0, 3);
+}
+
+/**
  * 构建 facts-workspace.json 的初始结构；只创建空槽位，不自动生成攻略事实。
  */
 function buildFacts(index, routeStructure) {
@@ -138,7 +187,7 @@ function buildFacts(index, routeStructure) {
       practical_info: [],
       notes: [],
       conflicts: [],
-      photos: (index.photos?.[place] ?? []).slice(0, 3),
+      photos: photosForPlace(index, place),
       source_files: filesForPlace(index, place),
     };
   }
