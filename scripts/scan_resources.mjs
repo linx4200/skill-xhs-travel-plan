@@ -28,14 +28,16 @@ const UTILITY_KEYWORDS = [
 ];
 
 /**
- * 解析命令行参数，得到素材目录、输出路径和显式传入的景点名/城市名列表。
+ * 解析命令行参数，得到素材目录、输出路径、结构化路线和显式传入的景点名/城市名列表。
  */
 function parseArgs(argv) {
-  const args = { places: [], cities: [], out: "resource-index.json", resourceDir: "" };
+  const args = { places: [], cities: [], routeJson: "", out: "resource-index.json", resourceDir: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "-o" || arg === "--out") {
       args.out = argv[++i];
+    } else if (arg === "--route-json") {
+      args.routeJson = argv[++i];
     } else if (arg === "--place") {
       args.places.push(argv[++i]);
     } else if (arg === "--city") {
@@ -47,9 +49,60 @@ function parseArgs(argv) {
     }
   }
   if (!args.resourceDir) {
-    throw new Error("Usage: node scripts/scan_resources.mjs <resource_dir> [-o resource-index.json] [--place 景点名] [--city 城市名]");
+    throw new Error(
+      "Usage: node scripts/scan_resources.mjs <resource_dir> [-o resource-index.json] [--route-json route-structure.json] [--place 景点名] [--city 城市名]",
+    );
   }
   return args;
+}
+
+/**
+ * 读取并解析 JSON 文件。
+ */
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+/**
+ * 把路线结构中的字符串或字符串数组字段规范成数组，忽略对象等非名称值。
+ */
+function asNameList(value) {
+  if (value === null || value === undefined || value === "") return [];
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .filter((item) => typeof item === "string" || typeof item === "number")
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+}
+
+/**
+ * 清理并去重字符串数组，保留第一次出现的顺序。
+ */
+function uniqueStrings(values) {
+  const result = [];
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text && !result.includes(text)) result.push(text);
+  }
+  return result;
+}
+
+/**
+ * 从 agent 已生成的 route-structure.json 提取候选景点和城市。
+ */
+function termsFromRoute(routeJsonPath) {
+  if (!routeJsonPath) return { places: [], cities: [] };
+  const route = readJson(routeJsonPath);
+  const places = [];
+  for (const day of Array.isArray(route.days) ? route.days : []) {
+    places.push(...asNameList(day.route_places ?? day.places));
+  }
+  places.push(...asNameList(route.route_places ?? route.places));
+
+  return {
+    places: uniqueStrings(places),
+    cities: uniqueStrings(asNameList(route.cities)),
+  };
 }
 
 /**
@@ -229,7 +282,8 @@ function scan(resourceDir, explicitPlaces, explicitCities) {
  */
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const index = scan(args.resourceDir, args.places, args.cities);
+  const routeTerms = termsFromRoute(args.routeJson);
+  const index = scan(args.resourceDir, [...routeTerms.places, ...args.places], [...routeTerms.cities, ...args.cities]);
   fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
   fs.writeFileSync(args.out, `${JSON.stringify(index, null, 2)}\n`, "utf8");
   const photoCount = Object.values(index.photos).reduce((sum, items) => sum + items.length, 0);

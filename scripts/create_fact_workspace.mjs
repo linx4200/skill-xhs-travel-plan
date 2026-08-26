@@ -125,6 +125,9 @@ function buildFacts(index, routeStructure) {
   for (const place of routePlaces) {
     placeFacts[place] = {
       summary: "",
+      elevation_m: null,
+      elevation_source_url: "",
+      elevation_checked_at: "",
       highlights: [],
       drawbacks: [],
       opening_hours: [],
@@ -145,6 +148,9 @@ function buildFacts(index, routeStructure) {
     cityFacts[city] = {
       include: false,
       summary: "",
+      elevation_m: null,
+      elevation_source_url: "",
+      elevation_checked_at: "",
       overview: [],
       backup_places: [],
       foods: [],
