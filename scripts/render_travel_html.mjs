@@ -66,6 +66,17 @@ function textList(value) {
 }
 
 /**
+ * 将海拔字段转换成可展示的短句；缺失时不生成内容。
+ */
+function elevationText(data) {
+  const elevation = data?.elevation_m;
+  if (elevation === null || elevation === undefined || elevation === "") return "";
+  const numeric = Number(elevation);
+  const value = Number.isFinite(numeric) ? Math.round(numeric) : String(elevation);
+  return `海拔约 ${value} 米。`;
+}
+
+/**
  * 把当前系统路径分隔符转换为 POSIX 分隔符，供 HTML src/href 使用。
  */
 function toPosix(value) {
@@ -171,6 +182,8 @@ function preparePhotos(place, photos, resourceRoot, outDir) {
  */
 function preparePlace(name, data, resourceRoot, outDir) {
   const groups = [];
+  const elevation = elevationText(data);
+  if (elevation) groups.push({ title: "海拔高度", items: [elevation] });
   for (const [title, key] of [
     ["看点", "highlights"],
     ["缺点", "drawbacks"],
@@ -262,6 +275,8 @@ function prepareDay(day, facts, resourceRoot, outDir, totalDays) {
  */
 function prepareCity(name, data) {
   const groups = [];
+  const elevation = elevationText(data);
+  if (elevation) groups.push({ title: "海拔高度", items: [elevation] });
   for (const [title, key] of [
     ["备选景点库", "backup_places"],
     ["美食", "foods"],
