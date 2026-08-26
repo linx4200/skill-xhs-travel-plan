@@ -22,7 +22,7 @@ node scripts/scan_resources.mjs <输入材料文件夹> \
   -o <工作目录>/resource-index.json
 ```
 
-脚本会从 `route-structure.json` 读取 `days[].route_places` 和 `cities` 作为候选匹配词。只有需要临时补充路线 JSON 之外的匹配词时，才追加独立的 `--place` 或 `--city` 参数；不要把城市名塞进 `--place`。
+脚本会从 `route-structure.json` 读取 `days[].route_places` 和 `cities` 作为候选匹配词。只有需要临时补充路线 JSON 之外的匹配词时，才追加独立的 `--place` 或 `--city` 参数；不要把只承担住宿、中转或行政定位作用的城市名塞进 `--place`。用户明确安排游玩或短停的城市/城区型地点应先规范进 `route_places`，例如“盐津县城”。
 
 脚本会扫描 `.json`、`.md`、`.txt` 和 `photos/`，输出文本素材索引、短摘录、候选地点命中和本地照片目录索引。使用索引决定下一步读取哪些原文；不要把大段素材直接打印进对话，只输出统计、异常和少量必要片段。
 
@@ -37,7 +37,7 @@ node scripts/create_fact_workspace.mjs \
   -o <工作目录>/facts-workspace.json
 ```
 
-随后 agent 读取 `facts-workspace.json` 中每个景点和城市的 `source_files`，只打开与该景点、城市或冲突判断相关的原文，并按 [info-rules.md](info-rules.md) 填充事实字段。景点 `source_files` 来自 `candidate_places`，城市 `source_files` 来自 `candidate_cities`；文件路径或标题命中只作为兜底。
+随后 agent 读取 `facts-workspace.json` 中每个路线地点和城市的 `source_files`，只打开与该地点、城市或冲突判断相关的原文，并按 [info-rules.md](info-rules.md) 填充事实字段。地点 `source_files` 来自 `candidate_places` 和明显同指的别名匹配，城市 `source_files` 来自 `candidate_cities`；文件路径或标题命中只作为兜底。
 
 渲染 HTML 前必须读取 [pre-render-online-research.md](pre-render-online-research.md)，独立判断本次攻略是否触发被允许的联网查询项。除用户另行明确授权外，只能查询该 reference 白名单中列出的信息；如果触发高原海拔规则，再把查询到的海拔、来源 URL 和查询日期填入 `facts-workspace.json`。
 
