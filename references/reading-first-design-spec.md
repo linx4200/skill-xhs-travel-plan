@@ -1,8 +1,8 @@
 # 阅读优先 · 极简网页样式设计文档（Reading-First Minimal Web Style）
 
-> 用途：把这套「阅读优先」极简设计 **100% 还原**到其他网页。
+> 用途：把这套「阅读优先」极简设计还原到旅游攻略 HTML 页面。
 > 唯一设计原则：**阅读体验 > 简洁 > 无装饰**。所有视觉元素只服务于「快速定位 + 看清结构」，不引入任何无实际作用的装饰（无阴影、无渐变、无彩色块、无图标堆砌）。
-> 配套文件：`reading-first.css`（复制即用；本文档描述其设计原则、结构契约和关键样式）。
+> 配套文件：`templates/travel-html/reading-first.css` 是样式实现的唯一来源；本文档只描述设计原则、结构契约和允许改动边界。
 
 ---
 
@@ -162,85 +162,19 @@
 
 ---
 
-## 7. 完整 CSS（复制即用）
+## 7. CSS 实现来源
 
-> 与 `reading-first.css` 的核心样式保持一致。生成旅游攻略时优先使用 `<link rel="stylesheet" href="reading-first.css">` 外链引入。
+样式实现以 [templates/travel-html/reading-first.css](../templates/travel-html/reading-first.css) 为准。修改模板或样式时，先按本文档确认结构契约和设计边界，再直接修改 CSS 文件；不要在本文档中维护第二份 CSS。
 
-```css
-:root{
-  --text:#1f1f1f;
-  --muted:#555;
-  --heading:#141414;
-  --border:#e6e6e6;
-  --line:#d8d8d6;
-  --marker:#747474;
-  --soft:#f6f6f5;
-  --page:#f3f3f2;
-  --measure:680px;
-}
-*{box-sizing:border-box}
-html{background:var(--page);-webkit-text-size-adjust:100%}
-body{
-  max-width:var(--measure);
-  margin:0 auto;
-  padding:28px 20px 72px;
-  background:#fff;
-  color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Source Han Sans SC",sans-serif;
-  font-size:16px;
-  line-height:1.85;
-  letter-spacing:.01em;
-}
-h1{font-size:1.7rem;line-height:1.35;font-weight:700;color:var(--heading);margin:0 0 14px;padding-bottom:14px;border-bottom:1px solid var(--border)}
-h2{font-size:1.32rem;font-weight:700;color:var(--heading);margin:0}
-h3{font-size:1.06rem;font-weight:700;color:var(--heading);margin:18px 0 8px}
-h4{font-size:1rem;font-weight:700;color:var(--heading);margin:16px 0 6px}
-p{margin:10px 0;color:var(--text)}
-ul{margin:10px 0;padding-left:1.4em}
-li{margin:6px 0}
-a{color:#1a5fb4}
-.meta{margin:8px 0 14px;color:var(--muted);font-size:.94rem;line-height:1.65}
-.page-nav{display:flex;flex-wrap:wrap;gap:8px 14px;margin:12px 0 22px;font-size:.96rem;line-height:1.55}
-.page-nav a{color:#1a5fb4;text-decoration-thickness:1px;text-underline-offset:3px}
-summary{
-  list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;
-  padding:9px 8px;margin:0 -8px;border-radius:6px;
-}
-summary::-webkit-details-marker{display:none}
-summary::before{
-  content:"";flex:0 0 auto;width:11px;height:11px;
-  background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0%200%2012%2012'%3E%3Cpath%20d='M4.5%202.5L8%206l-3.5%203.5'%20fill='none'%20stroke='%23666'%20stroke-width='1.8'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center/contain;
-  transition:transform .15s ease;
-}
-details[open]>summary::before{transform:rotate(90deg)}
-summary:hover{background:var(--soft)}
-summary h2,summary h3{margin:0}
-body>section{margin-top:30px}
-body>section>details>summary{border-top:1px solid var(--border);margin-top:8px;padding-top:20px}
-details details{margin:2px 0 2px 3px;padding-left:14px;border-left:2px solid var(--border)}
-.timeline{list-style:none;margin:14px 0 4px;padding:0 0 0 18px;border-left:2px solid var(--line)}
-.timeline>li{position:relative;margin:0 0 18px;padding:0 0 0 16px}
-.timeline>li:last-child{margin-bottom:4px}
-.timeline>li::before{content:"";position:absolute;left:-24px;top:.55em;width:10px;height:10px;border:2px solid var(--marker);border-radius:50%;background:#fff}
-.timeline strong{display:block;color:var(--heading);font-weight:700;line-height:1.55}
-.timeline p{margin:6px 0 0}
-.timeline ul{margin:6px 0 0}
-.photo{margin:12px 0}
-.photo img{display:block;width:100%;max-width:100%;height:auto}
-.photo figcaption{margin-top:6px;color:var(--muted);font-size:.92rem;line-height:1.55}
-.photo-grid{display:grid;gap:14px}
-h4+p,h4+ul{margin-top:4px}
-h3+p{margin-top:6px}
-@media (min-width:720px){body{padding:36px 28px 84px}}
-```
+生成旅游攻略时优先通过渲染脚本复制并外链 `reading-first.css`。除非用户明确要求单文件 HTML，不要把 CSS 内联进页面。
 
 ---
 
-## 8. 应用步骤（还原到任意网页）
+## 8. 应用步骤（还原到旅游攻略网页）
 
 1. 在目标 HTML 的 `<head>` 中加入视口标签：
    `<meta name="viewport" content="width=device-width, initial-scale=1.0">`
-2. 引入样式：`<link rel="stylesheet" href="reading-first.css">`，或直接把第 7 节 CSS 内联进 `<style>`。
+2. 引入样式：`<link rel="stylesheet" href="reading-first.css">`。
 3. 按第 5 节「结构契约」组织 HTML（一级分区用 `section>details>summary>h2`，二级项用 `section>details>summary>h3`）。
 4. 用 `open` 属性控制默认展开/收起；**无需改动任何正文内容**。
 
