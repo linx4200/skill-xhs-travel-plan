@@ -29,7 +29,7 @@ html{
 body{
   max-width:var(--measure);
   margin:0 auto;
-  padding:28px 20px 72px;
+  padding:20px;
   background:#fff;
   color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Source Han Sans SC",sans-serif;
@@ -44,7 +44,7 @@ h1{
   line-height:1.35;
   font-weight:700;
   color:var(--heading);
-  margin:0 0 14px;
+  margin:0;
   padding-bottom:14px;
   border-bottom:1px solid var(--border);
 }
@@ -197,5 +197,5 @@ h4+p,h4+ul{margin-top:4px}
 h3+p{margin-top:6px}
 
 @media (min-width:720px){
-  body{padding:36px 28px 84px}
+  body{padding:28px}
 }

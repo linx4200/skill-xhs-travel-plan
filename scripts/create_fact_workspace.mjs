@@ -51,6 +51,16 @@ function uniqueStrings(values) {
   return result;
 }
 
+/**
+ * 确保每日标题包含 agent 已结构化出的当天住宿城市；脚本不从自然语言路线中抽取住宿信息。
+ */
+function titleWithLodgingCity(title, lodgingCity) {
+  const baseTitle = String(title ?? "");
+  lodgingCity = String(lodgingCity ?? "").trim();
+  if (!lodgingCity || baseTitle.includes(lodgingCity)) return baseTitle;
+  return `${baseTitle} - 宿${lodgingCity}`;
+}
+
 // skill 作者按：感觉没啥必要。
 /**
  * 生成地点名的轻量别名，用于把“盐津县城”匹配到 photos/盐津/，
@@ -91,16 +101,19 @@ function relatedPlaceName(left, right) {
  */
 function normalizeDay(day, index) {
   const routePlaces = uniqueStrings(asList(day.route_places ?? day.places));
+  const sourceLine = String(day.source_line ?? day.title ?? "");
+  const lodgingCity = String(day.lodging_city ?? "");
   return {
     day: Number(day.day || index + 1),
     date: String(day.date ?? ""),
-    title: String(day.title ?? day.source_line ?? ""),
+    title: titleWithLodgingCity(day.title ?? sourceLine, lodgingCity),
+    lodging_city: lodgingCity,
     summary: String(day.summary ?? ""),
     route_places: routePlaces,
     timeline: asList(day.timeline),
     notes: asList(day.notes),
     confirmations: asList(day.confirmations),
-    source_line: String(day.source_line ?? day.title ?? ""),
+    source_line: sourceLine,
   };
 }
 
