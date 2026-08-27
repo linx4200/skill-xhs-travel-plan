@@ -57,8 +57,8 @@ function uniqueStrings(values) {
 function titleWithLodgingCity(title, lodgingCity) {
   const baseTitle = String(title ?? "");
   lodgingCity = String(lodgingCity ?? "").trim();
-  if (!lodgingCity || baseTitle.includes(lodgingCity)) return baseTitle;
-  return `${baseTitle} - 宿${lodgingCity}`;
+  if (!lodgingCity) return baseTitle;
+  return `${baseTitle} ｜ 宿${lodgingCity}`;
 }
 
 // skill 作者按：感觉没啥必要。
