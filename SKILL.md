@@ -11,17 +11,31 @@ metadata:
 
 ## 参考文件路由
 
-处理用户路线、输入材料、景点、城市、餐饮和整体旅程信息前，必须读取 [references/info-rules.md](references/info-rules.md)。
+不要在任务开始时一次性读取所有 reference。先根据用户目标和当前步骤选择最小必要文件；流程推进到对应阶段时再读取对应 reference。
 
-生成静态 HTML 攻略时，必须读取 [references/mobile-reading-html-output.md](references/mobile-reading-html-output.md)。
+### 必读入口
 
-当满足以下任一条件时，还必须读取 [references/structured-generation-workflow.md](references/structured-generation-workflow.md)，并优先使用其中的 `resource-index.json`、`facts-workspace.json`、渲染脚本和校验脚本流程：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、用户需要完整静态 HTML 攻略、或用户希望后续可重复修改。
+处理用户路线、输入材料、景点、城市、餐饮和整体旅程信息前，必须先读取 [references/info-rules.md](references/info-rules.md)。它是事实边界、路线解析、信息取舍、城市页 include 判断和内容去重的主规则。
 
-使用结构化流程读写 `route-structure.json`、`resource-index.json` 或 `facts-workspace.json` 时，必须遵守 [references/data-contracts.md](references/data-contracts.md)。
+### 结构化流程
 
-生成 HTML 前，必须读取 [references/pre-render-online-research.md](references/pre-render-online-research.md)，先判断本次攻略是否有被该 reference 明确列出的联网查询项；除了用户另行明确授权的信息，只有该 reference 白名单中列出的信息可以联网查询。
+当满足以下任一条件时，在生成 `route-structure.json` 前读取 [references/structured-generation-workflow.md](references/structured-generation-workflow.md)，并优先使用其中的 `resource-index.json`、`facts-workspace.json`、渲染脚本和校验脚本流程：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、用户需要完整静态 HTML 攻略、或用户希望后续可重复修改。
 
-页面视觉语言沿用 [reading-first-design-spec.md](references/reading-first-design-spec.md) 和 [reading-first.css](templates/travel-html/reading-first.css)。手写 HTML 或修改样式时，必须读取 `reading-first-design-spec.md`；使用渲染脚本且不改样式时不需要额外读取完整设计规范。
+首次创建或修改 `route-structure.json`、`resource-index.json`、`facts-workspace.json` 任一结构化文件前，读取 [references/data-contracts.md](references/data-contracts.md)。后续只改正文表达、不触碰 JSON 结构时，不需要重复读取。
+
+### 渲染前检查
+
+准备渲染 HTML 前，必须读取 [references/pre-render-online-research.md](references/pre-render-online-research.md)，独立判断本次攻略是否触发白名单联网查询项。除用户另行明确授权外，只能查询该 reference 明确允许的信息。
+
+### 输出前检查
+
+提交完整攻略或 HTML 产物前，必须读取 [references/manual-quality-check.md](references/manual-quality-check.md)，完成人工质量检查。HTML 文件存在性、互链、CSS、首页导航、生成时间、远程资源和图片路径等机械检查由 `node scripts/verify_output.mjs` 执行。
+
+### HTML 与样式
+
+常规完整 HTML 攻略应通过 `scripts/render_travel_html.mjs` 和 `templates/travel-html/*.ejs` 生成，并用 `scripts/verify_output.mjs` 校验。HTML 页面结构由模板、渲染脚本和校验脚本固化；使用渲染脚本且不改结构/样式时，不需要读取完整设计规范。
+
+手写 HTML、修改 HTML 结构、修改模板或修改样式前，必须读取 [references/reading-first-design-spec.md](references/reading-first-design-spec.md)，并同步检查 `templates/travel-html/*.ejs` 和 [templates/travel-html/reading-first.css](templates/travel-html/reading-first.css)。
 
 ## 工作原则
 
@@ -53,20 +67,9 @@ metadata:
 
 如果路线不完整但已经足以开始整理，可以先基于已知信息处理，并在输出中只列出真正影响执行的缺失项。
 
-## 人工质量检查
+## 质量检查
 
-输出前人工检查脚本无法判断的内容：
-
-- 是否只使用了用户提供、用户授权或 [references/pre-render-online-research.md](references/pre-render-online-research.md) 明确允许查询的材料。
-- 是否已覆盖用户路线中的每个城市和 `route_places` 真实游玩/短停地点。
-- 是否只为通过独立增量价值判断的城市生成 `city-XX.html`。
-- 每日景点详情是否只包含用户路线中的 `route_places` 地点，且没有把停车场、游客中心、入口等设施拼进标题。
-- 照片是否只来自输入材料文件夹，且按 `route_places` 地点归属展示；进入 `route_places` 的县城、老城、街区、古镇或观景台如有可归属本地照片，也必须展示。
-- 是否只保留对出行决策有帮助的 `材料未说明` 信息，并对关键冲突做并列说明。
-- 是否删除重复内容、套话、资料来源旁白、弱相关背景和空小节。
-- 当天行程安排中是否没有餐饮安排，除非用户明确要求。
-
-HTML 文件存在性、互链、CSS、首页导航、生成时间、远程资源和图片路径等机械检查由结构化流程中的 `node scripts/verify_output.mjs` 执行。
+完整攻略或 HTML 产物提交前，按 [references/manual-quality-check.md](references/manual-quality-check.md) 完成人工质量检查；不要只依赖 `node scripts/verify_output.mjs`。
 
 ## 禁止事项
 
