@@ -63,9 +63,51 @@
 - `files[].excerpt`：短摘录，只用于判断是否需要打开原文。
 - `photos`：按 `photos/地点名/` 或 `photos/地点别名/` 目录归属整理的本地照片路径。
 
+## reading-queue.json
+
+`reading-queue.json` 由 `create_reading_queue.mjs` 根据 `resource-index.json` 和 `facts-workspace.json` 生成，用于让 agent 按唯一原文文件读取材料。脚本只整理读取顺序和引用关系，不会抽取或判断攻略事实。
+
+重要字段：
+
+- `schema_version`：数据结构版本。
+- `needs_agent_review`：脚本生成后默认为 `true`，表示还需要 agent 阅读原文并填充事实。
+- `source.resource_root`：输入材料文件夹绝对路径。
+- `source.resource_index`：生成队列时使用的素材索引文件名。
+- `source.facts_workspace`：生成队列时使用的事实工作区文件名。
+- `stats.source_refs`：从 `places.*.source_files` 和 `cities.*.source_files` 收集到的引用次数。
+- `stats.unique_files`：去重后的原文文件数量。
+- `stats.unique_source_chars`：去重后文件的字符数总和。
+- `stats.repeated_source_chars`：按引用重复累计的字符数总和。
+- `stats.read_amplification`：重复读取放大倍数。
+- `files[].path`：相对输入材料文件夹的文本文件路径。
+- `files[].title`、`kind`、`char_count`、`candidate_places`、`candidate_cities`、`keywords`：来自 `resource-index.json` 的素材元数据。
+- `files[].consumers`：该文件服务的目标列表；每项包含 `type`、`name` 和 `reason`。
+- `files[].priority`：读取优先级；命中路线地点的文件为 `primary`，只命中城市的文件为 `secondary`。
+
+## source-digest.json
+
+`source-digest.json` 由 `create_source_digest_workspace.mjs` 根据 `reading-queue.json` 生成，用于保存 agent 逐个文件阅读原文后的结构化事实摘要。脚本只创建空壳，不会抽取事实，也不会把 digest 自动写回 `facts-workspace.json`。
+
+重要字段：
+
+- `schema_version`：数据结构版本。
+- `needs_agent_review`：脚本生成后默认为 `true`，表示还需要 agent 阅读原文、填充 digest 并复核。
+- `source.resource_root`：输入材料文件夹绝对路径。
+- `source.resource_index`：上游素材索引文件名。
+- `source.facts_workspace`：待接收事实分发的事实工作区文件名。
+- `source.reading_queue`：生成 digest 时使用的读取队列文件名。
+- `stats.files`：digest 中的文件壳数量。
+- `stats.reviewed_files`：已完成 agent 阅读的文件数量；初始化为 `0`。
+- `stats.pending_files`：尚未完成 agent 阅读的文件数量；初始化为文件总数。
+- `files[].path`、`title`、`kind`、`char_count`、`consumers`、`candidate_places`、`candidate_cities`、`keywords`、`priority`：来自 `reading-queue.json` 的文件元数据和目标归属。
+- `files[].reviewed`：agent 读完该文件并完成摘要后设为 `true`。
+- `files[].facts`：该文件中可分发到地点、城市、每日提醒或全局字段的事实项；每项应标明 `target_type`、`target_name`、`field` 和 `items`。可选保留短 `evidence`，只用于复核，不进入最终正文。
+- `files[].conflicts`：该文件暴露的事实冲突或待复核线索。
+- `files[].global_notes`：不只归属单个地点或城市的全局提醒。
+
 ## facts-workspace.json
 
-`facts-workspace.json` 由 `create_fact_workspace.mjs` 初始化，再由 agent 阅读相关原文后填充。脚本只创建空槽位，不会自行补事实。
+`facts-workspace.json` 由 `create_fact_workspace.mjs` 初始化，再由 agent 按 `source-digest.json` 或 `reading-queue.json` 的唯一文件顺序阅读原文后填充。脚本只创建空槽位，不会自行补事实；若已填好 `source-digest.json`，应先从 digest 分发有效事实，再按需回读原文复核。
 
 顶层字段：
 
@@ -133,5 +175,7 @@
 ## 字段维护原则
 
 - 新增、删除或改名 JSON 字段时，同时检查 `scripts/create_fact_workspace.mjs`、`scripts/render_travel_html.mjs` 和本文件。
+- 新增或调整读取队列结构时，同时检查 `scripts/create_reading_queue.mjs`、[structured-generation-workflow.md](structured-generation-workflow.md) 和本文件。
+- 新增或调整 source digest 结构时，同时检查 `scripts/create_source_digest_workspace.mjs`、[structured-generation-workflow.md](structured-generation-workflow.md) 和本文件。
 - 字段是否应该填、填什么内容，按 [info-rules.md](info-rules.md) 判断。
 - 字段为空时，渲染脚本应跳过对应小节，不要靠占位文案凑完整性。
