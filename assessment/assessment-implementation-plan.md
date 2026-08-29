@@ -307,9 +307,14 @@ quality-review.md
 ```text
 ## 人工复核
 
+- critical_fact_recall_eval_scope:
 - critical_fact_recall:
+- conflict_recall_eval_scope:
 - conflict_recall:
+- hallucination_eval_scope:
 - hallucination_count:
+- sampled_scope:
+- sampled_findings:
 - wrong_attribution_count:
 - city_noise_count:
 - manual_quality_pass:
@@ -333,6 +338,22 @@ quality-review.md
 ```
 
 人工只需要围绕脚本列出的候选风险抽查，同时补充脚本漏掉的关键问题。
+
+人工复核口径：
+
+- `critical_fact_recall`、`conflict_recall`、`hallucination_count` 如果严格评估，需要通读全部原始材料并逐条对齐最终攻略，人工成本高；baseline 第一版不强制做全文精确评估。
+- 对上述三项新增对应的 `*_eval_scope` 字段，统一使用 `not_evaluated`、`sampled`、`full` 标注评估深度。
+- `not_evaluated` 表示本轮未评估，不参与质量结论的精确比较。
+- `sampled` 表示只抽查部分景点、页面和 source files；必须在 `sampled_scope` 里写清楚抽样范围，并在 `sampled_findings` 中记录发现。后续 candidate 版本需要使用相同抽样范围，才可以做相对比较。
+- `full` 才表示已经建立完整关键事实清单、冲突清单或幻觉核对清单，可以填写精确比例或精确数量。
+- 未做 `full` 时，`critical_fact_recall` 和 `conflict_recall` 不应填写精确比例，可填 `not_evaluated`、`sampled_pass` 或 `sampled_risk`。
+- 未做 `full` 时，`hallucination_count` 不应填写精确数量，可填 `not_evaluated`、`sampled_0_found` 或 `sampled_risk_found`。
+- `wrong_attribution_count` 和 `city_noise_count` 可以优先围绕脚本候选和易混地点人工判断，不要求通读全部原始材料。
+- `manual_quality_pass` 是综合判断字段；即使前三项只做抽样，也可以给出 `true`/`false`，但必须保留抽样范围和主要风险说明。
+
+已同步到当前 baseline 文件：
+
+- `output/2026-guoqing-self-drive-plan/assess/baseline-001/quality-review.md`
 
 ### 阶段 8：建立对比报告
 
@@ -364,8 +385,8 @@ source digest 成功标准建议：
 
 - `actual_loaded_chars` 相比 baseline 降低 40% 以上。
 - 同一原文文件完整读取次数不超过 1。
-- `critical_fact_recall` 不下降。
-- `hallucination_count` 不增加。
+- `critical_fact_recall` 不下降；只有 baseline 和 candidate 都是 `full` 时才比较精确比例，都是 `sampled` 时必须使用相同 `sampled_scope` 做相对判断。
+- `hallucination_count` 不增加；只有 `full` 时才比较精确数量，`sampled` 时只比较相同抽样范围内是否发现新增风险。
 - `wrong_attribution_count` 不增加。
 - `final_verify_pass = true`。
 
@@ -373,8 +394,8 @@ RAG 成功标准建议：
 
 - `actual_loaded_tokens_estimated` 比 source digest 再降 30% 以上。
 - `fallback_full_file_reads` 控制在唯一 source 文件数的 20% 以内。
-- `critical_fact_recall` 至少达到 source digest 版本的 95%。
-- `hallucination_count = 0`。
+- `critical_fact_recall` 至少达到 source digest 版本的 95%；该数值标准只适用于双方都是 `full` 的评估结果，抽样评估只做同范围风险比较。
+- `hallucination_count = 0`；该数值标准只适用于 `full`，抽样评估记录为 `sampled_0_found` 或 `sampled_risk_found`。
 - `wrong_attribution_count = 0`。
 - `final_verify_pass = true`。
 
@@ -394,4 +415,6 @@ RAG 成功标准建议：
 - RAG 评估必须同时看质量，不允许只以 token 降低作为成功标准。
 - 所有指标都应保留 `null` 状态，表示当前流程尚未记录或无法自动计算，避免用 0 混淆未知值。
 - 人工复核字段应和自动指标放在同一个 run 目录中，方便复盘。
+- `critical_fact_recall`、`conflict_recall`、`hallucination_count` 不应默认要求全文人工核对；每次必须记录 `not_evaluated`、`sampled` 或 `full`，避免把抽样结论伪装成完整结论。
+- 如果 baseline 使用抽样质量评估，后续 source digest/RAG candidate 必须沿用同一 `sampled_scope`，否则不能直接比较前三项人工指标。
 - 每个 case 至少跑 baseline 和 candidate 两版；重要优化建议同一 case 跑 3 次取均值。
