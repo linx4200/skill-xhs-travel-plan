@@ -6,6 +6,8 @@
   "scripts": {
     "scan": "node scripts/scan_resources.mjs",
     "create-workspace": "node scripts/create_fact_workspace.mjs",
+    "create-queue": "node scripts/create_reading_queue.mjs",
+    "create-digest": "node scripts/create_source_digest_workspace.mjs",
     "render": "node scripts/render_travel_html.mjs",
     "verify": "node scripts/verify_output.mjs"
   },

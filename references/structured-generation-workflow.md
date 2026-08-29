@@ -37,7 +37,26 @@ node scripts/create_fact_workspace.mjs \
   -o <工作目录>/facts-workspace.json
 ```
 
-随后 agent 读取 `facts-workspace.json` 中每个路线地点和城市的 `source_files`，只打开与该地点、城市或冲突判断相关的原文，并按 [info-rules.md](info-rules.md) 填充事实字段。地点 `source_files` 来自 `candidate_places` 和明显同指的别名匹配，城市 `source_files` 来自 `candidate_cities`；文件路径或标题命中只作为兜底。
+再基于事实工作区生成按唯一文件去重的读取队列：
+
+```bash
+node scripts/create_reading_queue.mjs \
+  --index <工作目录>/resource-index.json \
+  --facts <工作目录>/facts-workspace.json \
+  -o <工作目录>/reading-queue.json
+```
+
+再创建待 agent 填充的文件级摘要工作区：
+
+```bash
+node scripts/create_source_digest_workspace.mjs \
+  --queue <工作目录>/reading-queue.json \
+  -o <工作目录>/source-digest.json
+```
+
+随后 agent 读取 `source-digest.json` 中的 `files[]`，只打开与地点、城市、全局提醒或冲突判断相关的原文，并按 [info-rules.md](info-rules.md) 填充每个文件的 `facts`、`conflicts` 和 `global_notes`。填完文件级 digest 后，再把有效事实分发到 `facts-workspace.json` 的对应地点、城市、每日提醒或全局字段。地点 `source_files` 来自 `candidate_places` 和明显同指的别名匹配，城市 `source_files` 来自 `candidate_cities`；文件路径或标题命中只作为兜底。若没有生成 `source-digest.json`，才直接读取 `reading-queue.json`；若也没有生成 `reading-queue.json`，才直接从 `facts-workspace.json` 汇总 `source_files` 后手工建立去重读取队列。
+
+无论使用 `source-digest.json`、`reading-queue.json`，还是手工队列，读取原文前都必须保证 `places.*.source_files` 和 `cities.*.source_files` 已按唯一文件去重。每个文件项应记录该文件服务的所有目标，包括相关地点、城市、全局事项和可能的冲突判断。每次打开一个原文文件时，同时处理它对应的全部目标；不要按 `places` 或 `cities` 逐项重复读取同一文件。
 
 渲染 HTML 前必须读取 [pre-render-online-research.md](pre-render-online-research.md)，独立判断本次攻略是否触发被允许的联网查询项。除用户另行明确授权外，只能查询该 reference 白名单中列出的信息；如果触发高原海拔规则，再把查询到的海拔、来源 URL 和查询日期填入 `facts-workspace.json`。
 
