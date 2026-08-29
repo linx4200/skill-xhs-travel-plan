@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "name": "travel_plan_quality_metrics",
+  "description": "用于评估 skill-xhs-travel-plan 在 baseline、source digest/reading queue、RAG 等不同流程下的事实质量、覆盖率、归因正确性、城市页噪声、重复内容和最终可执行性。",
+  "automation_levels": {
+    "full": "可以由脚本稳定计算，不依赖人工语义判断。",
+    "partial": "可以由脚本生成候选值或风险清单，但需要人工抽查或最终判断。",
+    "manual": "主要依赖人工阅读材料和产物后判断。"
+  },
+  "metrics": [
+    {
+      "name": "route_place_coverage",
+      "definition": "用户路线中的每个 route_place 是否在 facts-workspace 和最终每日页中得到覆盖。",
+      "unit": "ratio",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["route-structure.json", "facts-workspace.json", "output html"],
+      "calculation": "covered_route_places / total_route_places；covered 可按 summary/highlights/practical_info/routes/photos 等字段是否非空初步判断。",
+      "notes": "脚本只能判断是否有内容，不能判断内容是否充分或正确。"
+    },
+    {
+      "name": "empty_required_place_count",
+      "definition": "route_place 中完全缺少有效事实内容的地点数量。",
+      "unit": "places",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["route-structure.json", "facts-workspace.json"],
+      "calculation": "count(route_places where summary is empty and all major fact arrays are empty)",
+      "notes": "如果材料确实没有信息，空字段可能是合理结果，需要人工确认。"
+    },
+    {
+      "name": "critical_fact_recall",
+      "definition": "材料中与出行执行强相关的关键事实是否被最终攻略覆盖，例如门票、预约、开放、停车、入口、排队、安全、老人小孩、高反、游船、索道、交通管制等。",
+      "unit": "score_or_ratio",
+      "automation_level": "manual",
+      "can_be_automated": false,
+      "data_sources": ["original source files", "facts-workspace.json", "output html", "human review"],
+      "calculation": "人工建立关键事实清单后，计算 covered_critical_facts / total_critical_facts。",
+      "notes": "这是质量评估核心指标。RAG 或 digest 优化不能让该指标下降。"
+    },
+    {
+      "name": "critical_fact_candidate_count",
+      "definition": "脚本从材料中基于关键词识别出的潜在关键事实候选数量。",
+      "unit": "candidates",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["resource-index.json", "original source files"],
+      "calculation": "scan sentences or chunks containing critical keywords such as 门票、预约、停车、入口、排队、开放、安全、老人、小孩、高反。",
+      "notes": "只能作为人工 review 的候选清单，会有漏报和误报。"
+    },
+    {
+      "name": "conflict_recall",
+      "definition": "材料中存在互相矛盾且影响执行的信息时，最终攻略是否识别并表达了冲突。",
+      "unit": "score_or_ratio",
+      "automation_level": "manual",
+      "can_be_automated": false,
+      "data_sources": ["original source files", "facts-workspace.json", "output html", "human review"],
+      "calculation": "人工建立冲突清单后，计算 covered_conflicts / total_conflicts。",
+      "notes": "尤其关注票价、开放、路线、入口、停车、排队时长、是否值得去等冲突。"
+    },
+    {
+      "name": "conflict_candidate_count",
+      "definition": "脚本从材料中基于关键词和数值差异识别出的潜在冲突候选数量。",
+      "unit": "candidates",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["original source files", "source-digest.json", "rag retrieval log"],
+      "calculation": "scan contrastive words and conflicting numeric expressions such as 但是、不过、不建议、避雷、有人说、免费、收费、不同价格。",
+      "notes": "用于辅助人工复核，不能等同于真实冲突数。"
+    },
+    {
+      "name": "hallucination_count",
+      "definition": "最终攻略中出现但用户材料或允许联网来源没有支持的事实数量。",
+      "unit": "facts",
+      "automation_level": "manual",
+      "can_be_automated": false,
+      "data_sources": ["output html", "facts-workspace.json", "original source files", "human review"],
+      "calculation": "人工抽查最终攻略事实，统计无来源支持的事实。",
+      "notes": "本 skill 的事实边界严格，目标值应为 0。"
+    },
+    {
+      "name": "unsupported_fact_candidate_count",
+      "definition": "脚本根据事实追溯结构识别出的疑似无来源支持事实数量。",
+      "unit": "candidates",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["facts-workspace.json", "source-digest.json"],
+      "calculation": "count(fact items without source_files/evidence linkage if source traceability is required)",
+      "notes": "只能发现缺失追溯结构，不能证明内容一定幻觉。"
+    },
+    {
+      "name": "wrong_attribution_count",
+      "definition": "把 A 景点、城市或文件中的事实错误写到 B 景点、城市或日期下的数量。",
+      "unit": "facts",
+      "automation_level": "manual",
+      "can_be_automated": false,
+      "data_sources": ["original source files", "facts-workspace.json", "output html", "human review"],
+      "calculation": "人工核对事实所在位置和原文归属后统计。",
+      "notes": "城市名宽匹配和 RAG chunk 召回都可能增加该风险。目标值应为 0。"
+    },
+    {
+      "name": "wrong_attribution_candidate_count",
+      "definition": "脚本基于地点名、source_files 和输出页面位置识别出的疑似归因错误数量。",
+      "unit": "candidates",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["route-structure.json", "facts-workspace.json", "output html"],
+      "calculation": "scan day pages for place names not in that day's route_places; scan city pages for unrelated route_place names.",
+      "notes": "会误报备选景点、跨天引用和城市汇总，需要人工确认。"
+    },
+    {
+      "name": "city_noise_count",
+      "definition": "城市页或城市汇总中出现无独立增量价值、与本次路线弱相关、重复景点详情或空泛介绍的条目数量。",
+      "unit": "items",
+      "automation_level": "manual",
+      "can_be_automated": false,
+      "data_sources": ["facts-workspace.json", "output html", "human review"],
+      "calculation": "人工根据 info-rules.md 的城市 include 判断规则统计。",
+      "notes": "城市页质量不能仅靠 include=true 或字段非空判断。"
+    },
+    {
+      "name": "city_noise_candidate_count",
+      "definition": "脚本识别出的城市页疑似噪声候选数量。",
+      "unit": "candidates",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["facts-workspace.json", "route-structure.json", "output html"],
+      "calculation": "count(city items that duplicate place facts, contain generic phrases, or mention route_places unrelated to the city)",
+      "notes": "可用于 review 提示，但不能替代人工判断。"
+    },
+    {
+      "name": "duplicate_content_count",
+      "definition": "首页、每日页、城市页或确认清单中重复表达同一事实的次数。",
+      "unit": "duplicates",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["facts-workspace.json", "output html"],
+      "calculation": "normalize text items and count exact or high-similarity duplicates across sections.",
+      "notes": "精确重复可自动化；同义重复需要人工确认。"
+    },
+    {
+      "name": "final_verify_pass",
+      "definition": "最终 HTML 是否通过机械校验。",
+      "unit": "boolean",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["verify_output.mjs exit code"],
+      "calculation": "verify command exit code === 0",
+      "notes": "该指标也出现在成本指标中，因为它同时代表质量门槛和流程完成状态。"
+    },
+    {
+      "name": "broken_link_count",
+      "definition": "最终 HTML 中损坏的本地链接数量。",
+      "unit": "links",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["output html", "verify_output.mjs"],
+      "calculation": "count(local href/src targets that do not exist)",
+      "notes": "目标值为 0。"
+    },
+    {
+      "name": "missing_photo_count",
+      "definition": "最终 HTML 中引用但不存在的本地照片数量。",
+      "unit": "photos",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["output html", "output assets"],
+      "calculation": "count(img src targets that do not exist)",
+      "notes": "verify_output.mjs 应覆盖该问题。"
+    },
+    {
+      "name": "remote_resource_count",
+      "definition": "最终 HTML 中远程脚本、样式、图片、iframe 或其他远程资源数量。",
+      "unit": "resources",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["output html", "verify_output.mjs"],
+      "calculation": "count(disallowed http/https src or href references)",
+      "notes": "本 skill 默认禁止远程资源，目标值为 0。"
+    },
+    {
+      "name": "forbidden_section_count",
+      "definition": "最终 HTML 或 facts-workspace 中出现规则禁止的小节或表达数量。",
+      "unit": "items",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["facts-workspace.json", "output html", "manual-quality-check.md"],
+      "calculation": "scan for known forbidden phrases or sections, such as 餐饮节奏 and placeholder content.",
+      "notes": "已知禁用词可自动化；新的违规表达需要人工维护规则。"
+    },
+    {
+      "name": "source_traceability_ratio",
+      "definition": "最终结构化事实中能追溯到 source_files、source-digest evidence 或 RAG chunk source 的比例。",
+      "unit": "ratio",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["facts-workspace.json", "source-digest.json", "rag retrieval log"],
+      "calculation": "traceable_fact_items / total_fact_items",
+      "notes": "只能评估追溯链是否存在，不能保证证据一定支持事实。"
+    },
+    {
+      "name": "manual_quality_pass",
+      "definition": "人工按 manual-quality-check.md 完成复核后，产物是否通过。",
+      "unit": "boolean",
+      "automation_level": "manual",
+      "can_be_automated": false,
+      "data_sources": ["manual-quality-check.md", "human review"],
+      "calculation": "人工判断。",
+      "notes": "完整攻略提交前必须保留人工质量检查。"
+    },
+    {
+      "name": "overall_usefulness_score",
+      "definition": "最终攻略对真实出行执行的可用性评分。",
+      "unit": "score_1_to_5",
+      "automation_level": "manual",
+      "can_be_automated": false,
+      "data_sources": ["output html", "human review"],
+      "calculation": "人工按 1-5 分打分。",
+      "notes": "建议只作为最终验收辅助，不作为脚本自动化指标。"
+    }
+  ]
+}

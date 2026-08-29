@@ -1,0 +1,342 @@
+{
+  "schema_version": 1,
+  "name": "travel_plan_cost_metrics",
+  "description": "用于评估 skill-xhs-travel-plan 在 baseline、source digest/reading queue、RAG 等不同流程下的成本变化。成本指标主要衡量材料读取量、token 估算、检索量、回退量、耗时和产物校验结果。",
+  "automation_levels": {
+    "full": "可以由脚本稳定计算，不依赖人工语义判断。",
+    "partial": "可以由脚本计算或估算，但需要运行日志、agent 读取记录或人工抽查补齐。",
+    "manual": "主要依赖人工记录，不建议作为第一阶段自动化目标。"
+  },
+  "metrics": [
+    {
+      "name": "run_id",
+      "definition": "一次评估运行的唯一标识，用于关联输入材料、输出目录、运行日志和人工评估结果。",
+      "unit": "string",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["assess runner"],
+      "calculation": "由 assess 脚本按时间戳、variant 和测试集名称生成；也允许用户手动传入。",
+      "notes": "建议格式为 <case_name>-<variant>-<timestamp>。"
+    },
+    {
+      "name": "variant",
+      "definition": "本次运行使用的流程版本，例如 baseline、source_digest、rag。",
+      "unit": "enum",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["assess runner", "user input"],
+      "calculation": "由命令行参数传入，脚本原样写入指标文件。",
+      "notes": "同一测试集应至少比较 baseline、source_digest 和 rag 三类 variant。"
+    },
+    {
+      "name": "case_name",
+      "definition": "测试材料和路线组合的名称。",
+      "unit": "string",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["assess runner", "user input"],
+      "calculation": "由命令行参数传入，或从输出目录名推断。",
+      "notes": "用于区分小样例、中样例、大样例。"
+    },
+    {
+      "name": "raw_material_file_count",
+      "definition": "输入材料中被索引到的文本文件数量。",
+      "unit": "files",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["resource-index.json"],
+      "calculation": "resourceIndex.files.length",
+      "notes": "只统计 scan_resources.mjs 支持的文本扩展名，不含照片。"
+    },
+    {
+      "name": "raw_material_chars",
+      "definition": "输入文本材料的原始字符总量。",
+      "unit": "chars",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["resource-index.json"],
+      "calculation": "sum(resourceIndex.files[].char_count)",
+      "notes": "这是材料规模基准，不代表实际进入模型上下文的字符数。"
+    },
+    {
+      "name": "photo_count",
+      "definition": "输入材料中被索引到的本地照片数量。",
+      "unit": "photos",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["resource-index.json"],
+      "calculation": "sum(Object.values(resourceIndex.photos).map(items => items.length))",
+      "notes": "用于观察照片规模是否影响渲染和校验；不直接折算 token。"
+    },
+    {
+      "name": "source_ref_count",
+      "definition": "facts-workspace 中所有地点和城市 source_files 的累计引用次数。",
+      "unit": "refs",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["facts-workspace.json"],
+      "calculation": "count(flatten(places.*.source_files + cities.*.source_files))",
+      "notes": "该指标越高，按地点/城市逐项读取时越容易发生重复读取。"
+    },
+    {
+      "name": "unique_source_file_count",
+      "definition": "facts-workspace 中 source_files 去重后的唯一原文文件数量。",
+      "unit": "files",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["facts-workspace.json"],
+      "calculation": "new Set(allSourceFiles).size",
+      "notes": "source digest/reading queue 优化后，实际完整读取文件数应接近该值。"
+    },
+    {
+      "name": "unique_source_chars",
+      "definition": "source_files 去重后对应原文文件的字符总量。",
+      "unit": "chars",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["resource-index.json", "facts-workspace.json"],
+      "calculation": "sum(char_count for each unique source file)",
+      "notes": "这是不使用 RAG 时，唯一文件读取的理论下限。"
+    },
+    {
+      "name": "repeated_source_chars",
+      "definition": "如果按地点和城市逐项读取 source_files，不去重时的理论累计字符量。",
+      "unit": "chars",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["resource-index.json", "facts-workspace.json"],
+      "calculation": "sum(char_count for every source_files reference, including duplicates)",
+      "notes": "用于衡量当前流程的读取放大问题。"
+    },
+    {
+      "name": "read_amplification",
+      "definition": "重复读取字符量相对唯一读取字符量的放大倍数。",
+      "unit": "ratio",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["unique_source_chars", "repeated_source_chars"],
+      "calculation": "repeated_source_chars / unique_source_chars",
+      "notes": "source digest 优化的第一目标是把实际读取行为从 repeated_source_chars 拉回 unique_source_chars 附近。"
+    },
+    {
+      "name": "reading_queue_file_count",
+      "definition": "reading-queue.json 中需要读取的唯一文件数量。",
+      "unit": "files",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["reading-queue.json"],
+      "calculation": "readingQueue.files.length",
+      "notes": "仅适用于 source digest/reading queue 流程。"
+    },
+    {
+      "name": "reading_queue_chars",
+      "definition": "reading-queue.json 中唯一文件的字符总量。",
+      "unit": "chars",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["reading-queue.json"],
+      "calculation": "sum(readingQueue.files[].char_count)",
+      "notes": "应接近 unique_source_chars。"
+    },
+    {
+      "name": "source_digest_file_count",
+      "definition": "source-digest.json 中记录的文件数量。",
+      "unit": "files",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["source-digest.json"],
+      "calculation": "sourceDigest.files.length",
+      "notes": "仅适用于 source digest 流程。"
+    },
+    {
+      "name": "source_digest_reviewed_count",
+      "definition": "source-digest.json 中已由 agent 标记 reviewed=true 的文件数量。",
+      "unit": "files",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["source-digest.json"],
+      "calculation": "count(sourceDigest.files where reviewed === true)",
+      "notes": "用于检查文件级事实抽取是否完成。"
+    },
+    {
+      "name": "source_digest_fact_count",
+      "definition": "source-digest.json 中抽取出的结构化事实条目数量。",
+      "unit": "facts",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["source-digest.json"],
+      "calculation": "sum(sourceDigest.files[].facts.length)",
+      "notes": "只能代表抽取数量，不能代表事实质量。"
+    },
+    {
+      "name": "retrieved_chunk_count",
+      "definition": "RAG 流程中被检索并提供给 agent 的 chunk 数量。",
+      "unit": "chunks",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["rag retrieval log"],
+      "calculation": "count(retrievalLog.retrieved_chunks)",
+      "notes": "仅适用于 RAG 流程。"
+    },
+    {
+      "name": "retrieved_chunk_chars",
+      "definition": "RAG 流程中被检索并提供给 agent 的 chunk 字符总量。",
+      "unit": "chars",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["rag retrieval log"],
+      "calculation": "sum(retrievedChunks[].text.length)",
+      "notes": "用于和 raw_material_chars、unique_source_chars、baseline actual_loaded_chars 比较。"
+    },
+    {
+      "name": "fallback_full_file_reads",
+      "definition": "RAG 流程中因为召回不足、冲突复核或高风险事实复核而回读完整原文文件的次数。",
+      "unit": "reads",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["rag retrieval log", "read log"],
+      "calculation": "count(readLog entries where mode === 'full_file' and reason includes fallback)",
+      "notes": "如果该指标偏高，RAG 的成本收益会下降。"
+    },
+    {
+      "name": "fallback_full_file_chars",
+      "definition": "RAG 流程中 fallback 回读完整原文文件的字符总量。",
+      "unit": "chars",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["resource-index.json", "rag retrieval log", "read log"],
+      "calculation": "sum(char_count for fallback full-file read entries)",
+      "notes": "需要对重复 fallback 做去重和不去重两种统计。"
+    },
+    {
+      "name": "actual_loaded_chars",
+      "definition": "本次运行中实际进入 agent 阅读上下文的原文或 chunk 字符总量。",
+      "unit": "chars",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["read log", "rag retrieval log", "agent instrumentation"],
+      "calculation": "sum(chars for every recorded read event sent to agent context)",
+      "notes": "需要建立读取日志；如果 agent 手动打开文件但没有记录，会低估。"
+    },
+    {
+      "name": "actual_loaded_tokens_estimated",
+      "definition": "根据 actual_loaded_chars 或实际读取文本用 tokenizer 估算的输入 token 数。",
+      "unit": "tokens",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["read log", "tokenizer"],
+      "calculation": "tokenize(concat(all loaded text)).length",
+      "notes": "这是估算值，不一定等于平台真实计费 token，但适合比较趋势。"
+    },
+    {
+      "name": "output_tokens_estimated",
+      "definition": "最终 JSON、HTML 或 agent 回复产物的估算输出 token 数。",
+      "unit": "tokens",
+      "automation_level": "partial",
+      "can_be_automated": true,
+      "data_sources": ["facts-workspace.json", "output html", "tokenizer"],
+      "calculation": "tokenize(final outputs).length",
+      "notes": "如果只比较材料读取优化，可作为辅助指标。"
+    },
+    {
+      "name": "wall_time_seconds",
+      "definition": "从评估运行开始到完整产物生成并完成校验的墙钟耗时。",
+      "unit": "seconds",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["assess runner"],
+      "calculation": "(endTimeMs - startTimeMs) / 1000",
+      "notes": "应区分全流程耗时和各阶段耗时。"
+    },
+    {
+      "name": "scan_time_seconds",
+      "definition": "运行 scan_resources.mjs 的耗时。",
+      "unit": "seconds",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["assess runner"],
+      "calculation": "time(command: npm run scan)",
+      "notes": "通常不是主要瓶颈。"
+    },
+    {
+      "name": "workspace_time_seconds",
+      "definition": "创建 facts-workspace 或 source-digest 工作区的耗时。",
+      "unit": "seconds",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["assess runner"],
+      "calculation": "time(command: create-workspace/create-reading-queue/create-source-digest-workspace)",
+      "notes": "用于观察新增中间层是否带来明显脚本开销。"
+    },
+    {
+      "name": "render_time_seconds",
+      "definition": "运行 render_travel_html.mjs 的耗时。",
+      "unit": "seconds",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["assess runner"],
+      "calculation": "time(command: npm run render)",
+      "notes": "与材料读取优化关系较弱，但应纳入端到端评估。"
+    },
+    {
+      "name": "verify_time_seconds",
+      "definition": "运行 verify_output.mjs 的耗时。",
+      "unit": "seconds",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["assess runner"],
+      "calculation": "time(command: npm run verify)",
+      "notes": "与材料读取优化关系较弱，但应纳入端到端评估。"
+    },
+    {
+      "name": "final_verify_pass",
+      "definition": "最终 HTML 是否通过机械校验。",
+      "unit": "boolean",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["verify_output.mjs exit code"],
+      "calculation": "verify command exit code === 0",
+      "notes": "只能验证 HTML 结构和资源，不验证事实质量。"
+    },
+    {
+      "name": "html_file_count",
+      "definition": "输出目录中的 HTML 文件数量。",
+      "unit": "files",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["output directory"],
+      "calculation": "count(files matching *.html)",
+      "notes": "用于确认城市页和每日页产物规模。"
+    },
+    {
+      "name": "broken_link_count",
+      "definition": "HTML 产物中本地链接指向不存在文件的数量。",
+      "unit": "links",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["output html", "verify_output.mjs"],
+      "calculation": "count(local href/src targets that do not exist)",
+      "notes": "可以由 verify_output.mjs 或 assess 扩展校验计算。"
+    },
+    {
+      "name": "remote_resource_count",
+      "definition": "HTML 产物中远程资源链接数量。",
+      "unit": "resources",
+      "automation_level": "full",
+      "can_be_automated": true,
+      "data_sources": ["output html", "verify_output.mjs"],
+      "calculation": "count(src/href values starting with http:// or https:// where disallowed)",
+      "notes": "本 skill 默认禁止远程资源。"
+    },
+    {
+      "name": "manual_intervention_count",
+      "definition": "本次运行中需要人工补充、纠错、重跑或调整的次数。",
+      "unit": "events",
+      "automation_level": "manual",
+      "can_be_automated": false,
+      "data_sources": ["human notes"],
+      "calculation": "人工记录。",
+      "notes": "可以先作为人工字段写入 run-metrics.json。"
+    }
+  ]
+}
