@@ -168,7 +168,7 @@ function noteGroups(value) {
  */
 function preparePhotos(place, photos, resourceRoot, outDir) {
   const prepared = [];
-  for (const photo of asList(photos).slice(0, 3)) {
+  for (const photo of asList(photos)) {
     const photoPath = textOf(photo);
     const rel = copyPhoto(photoPath, place, resourceRoot, outDir);
     if (!rel) continue;

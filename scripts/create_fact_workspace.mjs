@@ -129,9 +129,14 @@ function routePlacesFromDays(days) {
 function photosForPlace(index, place) {
   const photos = [];
   for (const [photoPlace, items] of Object.entries(index.photos ?? {})) {
-    if (relatedPlaceName(place, photoPlace)) photos.push(...items);
+    const aliases = placeAliases(place);
+    if (relatedPlaceName(place, photoPlace)) {
+      photos.push(...items);
+      continue;
+    }
+    photos.push(...items.filter((item) => aliases.some((alias) => item.includes(alias))));
   }
-  return uniqueStrings(photos).slice(0, 3);
+  return uniqueStrings(photos);
 }
 
 /**
