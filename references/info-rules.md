@@ -23,7 +23,7 @@
 
 解析用户路线规划，提取每天的日期、城市、景点和活动，得到 `route-structure.json.days` 与候选城市清单。具体字段见 [data-contracts.md](data-contracts.md)。
 
-住宿城市必须由 agent 在路线解析阶段判断并写入 `route-structure.json.days[].lodging_city`。用户路线出现“宿某地”“住某地”“继续住某地”等住宿安排时，`lodging_city` 填对应城市；当天标题 `days[].title` 必须包含该城市。不要依赖脚本从 `source_line` 用正则抽取住宿信息。
+住宿城市必须由 agent 在路线解析阶段判断并写入 `route-structure.json.days[].lodging_city`。用户路线出现“宿某地”“住某地”“继续住某地”等住宿安排时，`lodging_city` 填对应城市；当天标题 `days[].title` 不写住宿后缀，最终展示标题由脚本根据 `lodging_city` 统一追加。不要依赖脚本从 `source_line` 用正则抽取住宿信息。
 
 `route_places` 只放用户路线中明确出现、且会在当天实际游玩或短停的真实地点。它通常是景点/景区，也可以是用户明确写了“游玩”“逛”“短停”“打卡”的古镇、县城老城、街区、观景台或村镇。必须排除只承担出发、住宿、中转或行政定位作用的城市名，以及停车场、游客中心、售票处、入口、公交站、车站、码头、餐厅、酒店、商场和普通导航点。
 

@@ -169,7 +169,7 @@
 - 如果 item 是 `{ text, source_refs }`，最终 HTML 只展示 `text`。
 - `source_refs` 不进入最终页面。
 
-### 4. script/assessment/assess_sources.mjs
+### 4. scripts/assessment/assess_sources.mjs
 
 新增指标：
 
@@ -187,7 +187,7 @@
 - 新增 `source_file_read_amplification`，继续衡量父级 source_files 放大。
 - 新增 `digest_based_read_amplification`，按 digest fact source refs 衡量分发后的实际重复读取。
 
-### 5. script/assessment/assess_quality.mjs
+### 5. scripts/assessment/assess_quality.mjs
 
 修改来源追溯逻辑：
 
@@ -196,7 +196,7 @@
 - `global_notes` 和 `confirm_before_departure` 必须纳入追溯检查。
 - 对 `source_digest` variant，如果全局提醒和确认清单没有来源，应输出明确失败或高风险 warning。
 
-### 6. script/assessment/assess_run.mjs
+### 6. scripts/assessment/assess_run.mjs
 
 在 `--variant source_digest` 时新增阶段：
 

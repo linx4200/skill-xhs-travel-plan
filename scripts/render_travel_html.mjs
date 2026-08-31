@@ -3,6 +3,7 @@ import ejs from "ejs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { dayDisplayTitle } from "./day_title_utils.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SKILL_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -110,7 +111,7 @@ function includedCities(facts) {
 function dayTitle(day) {
   const no = day.day ?? "";
   const fallback = [day.date, (day.route_places ?? []).join(" / ")].filter(Boolean).join("｜");
-  const title = day.title || fallback;
+  const title = dayDisplayTitle(day.title || fallback, day.lodging_city);
   return no ? `Day ${no}｜${title}` : String(title);
 }
 
