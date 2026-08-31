@@ -47,7 +47,7 @@ function parseArgs(argv) {
 
   if (!args.caseName || !args.variant || !args.route || !args.workDir) {
     throw new Error(
-      "Usage: node script/assessment/assess_run.mjs --case <case-name> --variant <baseline|source_digest|rag> --route <route-structure.json> --work-dir <work-dir> [--resource-dir <input-resource-dir>] [--html-output-dir <html-output-dir>] [--resource-index <resource-index.json>] [--facts <facts-workspace.json>] [--run-id <run-id>]",
+      "Usage: node scripts/assessment/assess_run.mjs --case <case-name> --variant <baseline|source_digest|rag> --route <route-structure.json> --work-dir <work-dir> [--resource-dir <input-resource-dir>] [--html-output-dir <html-output-dir>] [--resource-index <resource-index.json>] [--facts <facts-workspace.json>] [--run-id <run-id>]",
     );
   }
 
@@ -318,7 +318,7 @@ function main() {
   timing = recordStage(runCommand("verify", process.execPath, ["scripts/verify_output.mjs", htmlOutputDir], { cwd: path.resolve(args.skillRoot) }));
 
   const assessSourceArgs = [
-    "script/assessment/assess_sources.mjs",
+    "scripts/assessment/assess_sources.mjs",
     "--index",
     resourceIndex,
     "--facts",
@@ -333,7 +333,7 @@ function main() {
   if (timing.exit_code !== 0) throw new Error(`source assessment failed. See ${paths.stageTimings}`);
 
   const assessQualityArgs = [
-    "script/assessment/assess_quality.mjs",
+    "scripts/assessment/assess_quality.mjs",
     "--route",
     paths.route,
     "--facts",
