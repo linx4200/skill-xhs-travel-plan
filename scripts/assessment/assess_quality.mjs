@@ -49,7 +49,7 @@ function parseArgs(argv) {
 
   if (!args.route || !args.facts || !args.outputDir || !args.out) {
     throw new Error(
-      "Usage: node script/assessment/assess_quality.mjs --route <route-structure.json> --facts <facts-workspace.json> --output-dir <html-output-dir> -o <quality-metrics.json>",
+      "Usage: node scripts/assessment/assess_quality.mjs --route <route-structure.json> --facts <facts-workspace.json> --output-dir <html-output-dir> -o <quality-metrics.json>",
     );
   }
 

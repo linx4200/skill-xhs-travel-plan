@@ -25,7 +25,7 @@ function parseArgs(argv) {
 
   if (!args.index || !args.facts || !args.out) {
     throw new Error(
-      "Usage: node script/assessment/assess_sources.mjs --index <resource-index.json> --facts <facts-workspace.json> [-o <cost-metrics.json>] [--reading-queue <reading-queue.json>] [--source-digest <source-digest.json>] [--read-log <read-log.json>]",
+      "Usage: node scripts/assessment/assess_sources.mjs --index <resource-index.json> --facts <facts-workspace.json> [-o <cost-metrics.json>] [--reading-queue <reading-queue.json>] [--source-digest <source-digest.json>] [--read-log <read-log.json>]",
     );
   }
 

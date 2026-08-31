@@ -54,13 +54,13 @@ output/<case-name>/assess/<run-id>/
 新增脚本：
 
 ```text
-script/assessment/assess_sources.mjs
+scripts/assessment/assess_sources.mjs
 ```
 
 输入：
 
 ```text
-node script/assessment/assess_sources.mjs \
+node scripts/assessment/assess_sources.mjs \
   --index <resource-index.json> \
   --facts <facts-workspace.json> \
   -o <cost-metrics.json>
@@ -92,13 +92,13 @@ node script/assessment/assess_sources.mjs \
 
 执行记录（2026-08-29）：
 
-- 已实现 `script/assessment/assess_sources.mjs`。计划原先写作 `scripts/assess`，实际按本仓库本轮约定统一放在 `script/assessment`。
+- 已实现 `scripts/assessment/assess_sources.mjs`。计划原先写作 `scripts/assess`，实际按本仓库本轮约定统一放在 `scripts/assessment`。
 - 脚本读取 `resource-index.json` 和 `facts-workspace.json`，输出 `schema_version`、生成时间、输入路径、`metrics`、来源引用明细、未解析来源和 warnings。
 - 已兼容可选 `--reading-queue <reading-queue.json>` 与 `--source-digest <source-digest.json>`；未提供且相邻目录不存在时，对应指标输出 `null`，用于区分“未接入”和“数量为 0”。
 - 已用当前样例运行：
 
 ```text
-node script/assessment/assess_sources.mjs \
+node scripts/assessment/assess_sources.mjs \
   --index output/2026-guoqing-self-drive-plan/resource-index.json \
   --facts output/2026-guoqing-self-drive-plan/facts-workspace.json \
   -o output/2026-guoqing-self-drive-plan/cost-metrics.json
@@ -111,13 +111,13 @@ node script/assessment/assess_sources.mjs \
 新增脚本：
 
 ```text
-script/assessment/assess_quality.mjs
+scripts/assessment/assess_quality.mjs
 ```
 
 输入：
 
 ```text
-node script/assessment/assess_quality.mjs \
+node scripts/assessment/assess_quality.mjs \
   --route <route-structure.json> \
   --facts <facts-workspace.json> \
   --output-dir <html-output-dir> \
@@ -142,7 +142,7 @@ node script/assessment/assess_quality.mjs \
 
 执行记录（2026-08-29）：
 
-- 已实现 `script/assessment/assess_quality.mjs`。
+- 已实现 `scripts/assessment/assess_quality.mjs`。
 - 脚本读取 `route-structure.json`、`facts-workspace.json` 和 HTML 输出目录，生成 `quality-metrics.json`。输出包含 `metrics`、候选风险明细、机械校验错误明细和 warnings。
 - `final_verify_pass`、`broken_link_count`、`missing_photo_count`、`remote_resource_count`、`forbidden_section_count` 复用现有 `verify_output.mjs` 的主要规则口径。
 - `wrong_attribution_candidate_count` 当前按“其他 route_place 出现在非当天 day page”及“route_place 出现在疑似无关 city page”生成候选。
@@ -152,7 +152,7 @@ node script/assessment/assess_quality.mjs \
 - 已用当前样例运行：
 
 ```text
-node script/assessment/assess_quality.mjs \
+node scripts/assessment/assess_quality.mjs \
   --route output/2026-guoqing-self-drive-plan/route-structure.json \
   --facts output/2026-guoqing-self-drive-plan/facts-workspace.json \
   --output-dir output/2026-guoqing-self-drive-plan \
@@ -167,7 +167,7 @@ node script/assessment/assess_quality.mjs \
 新增脚本：
 
 ```text
-script/assessment/assess_run.mjs
+scripts/assessment/assess_run.mjs
 ```
 
 目标是把现有流程包起来，统一记录耗时和产物路径。
@@ -175,7 +175,7 @@ script/assessment/assess_run.mjs
 输入示例：
 
 ```text
-node script/assessment/assess_run.mjs \
+node scripts/assessment/assess_run.mjs \
   --case 2026-guoqing-self-drive-plan \
   --variant baseline \
   --resource-dir <input-resource-dir> \
@@ -198,7 +198,7 @@ node script/assessment/assess_run.mjs \
 
 执行记录（2026-08-29）：
 
-- 已实现 `script/assessment/assess_run.mjs`。
+- 已实现 `scripts/assessment/assess_run.mjs`。
 - 必填参数为 `--case`、`--variant`、`--route`、`--work-dir`；可选参数包括 `--resource-dir`、`--html-output-dir`、`--resource-index`、`--facts`、`--run-id`、`--model`、`--reading-queue`、`--source-digest`、`--skill-root`。
 - 运行目录默认写到 `<work-dir>/assess/<run-id>/`；如果不传 `--html-output-dir`，HTML 默认写到 run 目录下的 `html/`。
 - wrapper 会优先使用显式传入的 `--resource-index` / `--facts`，其次使用 `<work-dir>/resource-index.json` 和 `<work-dir>/facts-workspace.json`。缺失时才调用 `scan_resources.mjs` 或 `create_fact_workspace.mjs` 生成对应文件。
@@ -208,7 +208,7 @@ node script/assessment/assess_run.mjs \
 - 已用当前样例运行：
 
 ```text
-node script/assessment/assess_run.mjs \
+node scripts/assessment/assess_run.mjs \
   --case 2026-guoqing-self-drive-plan \
   --variant baseline \
   --route output/2026-guoqing-self-drive-plan/route-structure.json \
@@ -219,7 +219,7 @@ node script/assessment/assess_run.mjs \
 
 - 样例 run 目录：`output/2026-guoqing-self-drive-plan/assess/baseline-smoke/`。
 - 样例结果：`run-config.json` 状态为 `passed`；`stage-timings.json` 中 `scan` 和 `workspace` 为 `skipped`，`assess_sources`、`render`、`verify`、`assess_quality` 均为 `passed`；成本和质量指标与阶段 2、阶段 3 单独运行结果一致。
-- 已运行 `node --check script/assessment/assess_run.mjs`，语法检查通过。
+- 已运行 `node --check scripts/assessment/assess_run.mjs`，语法检查通过。
 
 ### 阶段 5：增加读取日志
 
@@ -265,8 +265,8 @@ source digest 流程中，读取 queue 时可以让 agent 或辅助脚本记录�
 - 已新增 `scripts/create_read_log.mjs` 和 `npm run create-read-log`。
 - 脚本支持从 `--digest <source-digest.json>` 生成读取日志；默认只记录 `reviewed=true` 的文件，并把事件标记为 `inferred=true` / `inferred_from=source_digest.reviewed_files`。
 - 也支持从 `--queue <reading-queue.json>` 生成计划读取日志，用于还没有 digest 时估算完整队列阅读成本。
-- 已修改 `script/assessment/assess_sources.mjs`，支持 `--read-log <read-log.json>`，并输出 `read_log_event_count`、`full_file_read_count`、`unique_loaded_file_count`、`actual_loaded_chars`、`actual_loaded_tokens_estimated`。
-- 已修改 `script/assessment/assess_run.mjs`，支持 `--read-log`；`source_digest` variant 如果没有显式传入 read log，会从已 review 的 source digest 自动生成一份推断日志并纳入成本评估。
+- 已修改 `scripts/assessment/assess_sources.mjs`，支持 `--read-log <read-log.json>`，并输出 `read_log_event_count`、`full_file_read_count`、`unique_loaded_file_count`、`actual_loaded_chars`、`actual_loaded_tokens_estimated`。
+- 已修改 `scripts/assessment/assess_run.mjs`，支持 `--read-log`；`source_digest` variant 如果没有显式传入 read log，会从已 review 的 source digest 自动生成一份推断日志并纳入成本评估。
 
 ### 阶段 5.1：收紧 reading queue 路线范围过滤
 
@@ -377,13 +377,13 @@ quality-review.md
 新增脚本：
 
 ```text
-script/assessment/assess_compare.mjs
+scripts/assessment/assess_compare.mjs
 ```
 
 输入：
 
 ```text
-node script/assessment/assess_compare.mjs \
+node scripts/assessment/assess_compare.mjs \
   --baseline <baseline-run-dir> \
   --candidate <candidate-run-dir> \
   -o <comparison.md>
