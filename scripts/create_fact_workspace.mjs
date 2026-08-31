@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { cleanDayTitle } from "./day_title_utils.mjs";
+import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
 
 /**
  * 解析命令行参数，得到结构化路线 JSON、素材索引和输出路径。
@@ -52,51 +54,6 @@ function uniqueStrings(values) {
 }
 
 /**
- * 确保每日标题包含 agent 已结构化出的当天住宿城市；脚本不从自然语言路线中抽取住宿信息。
- */
-function titleWithLodgingCity(title, lodgingCity) {
-  const baseTitle = String(title ?? "");
-  lodgingCity = String(lodgingCity ?? "").trim();
-  if (!lodgingCity) return baseTitle;
-  return `${baseTitle} ｜ 宿${lodgingCity}`;
-}
-
-// skill 作者按：感觉没啥必要。
-/**
- * 生成地点名的轻量别名，用于把“盐津县城”匹配到 photos/盐津/，
- * 或把“九洞天景区”匹配到 photos/九洞天/。这里只做保守名称归一，
- * 语义取舍仍由 agent 复核。
- */
-function placeAliases(name) {
-  const source = String(name ?? "").trim();
-  if (!source) return [];
-  const aliases = new Set([source]);
-  let stripped = source;
-  for (const suffix of ["风景名胜区", "风景区", "旅游区", "国家公园", "景区", "古镇", "县城", "老城", "城区", "市区"]) {
-    if (stripped.endsWith(suffix) && stripped.length > suffix.length) {
-      stripped = stripped.slice(0, -suffix.length);
-      aliases.add(stripped);
-    }
-  }
-  if (stripped.endsWith("县") && stripped.length > 2) aliases.add(stripped.slice(0, -1));
-  if (stripped.endsWith("市") && stripped.length > 2) aliases.add(stripped.slice(0, -1));
-  return [...aliases].filter((alias) => alias.length >= 2);
-}
-
-/**
- * 判断两个地点名称是否足够明确地同指。允许一个名称包含另一个名称，
- * 以覆盖“昭通大山包”与“大山包”这类材料目录简写。
- */
-function relatedPlaceName(left, right) {
-  for (const a of placeAliases(left)) {
-    for (const b of placeAliases(right)) {
-      if (a === b || a.includes(b) || b.includes(a)) return true;
-    }
-  }
-  return false;
-}
-
-/**
  * 规范单日路线对象，确保工作区中的每日字段稳定存在。
  */
 function normalizeDay(day, index) {
@@ -106,7 +63,7 @@ function normalizeDay(day, index) {
   return {
     day: Number(day.day || index + 1),
     date: String(day.date ?? ""),
-    title: titleWithLodgingCity(day.title ?? sourceLine, lodgingCity),
+    title: cleanDayTitle(day.title ?? sourceLine),
     lodging_city: lodgingCity,
     summary: String(day.summary ?? ""),
     route_places: routePlaces,
