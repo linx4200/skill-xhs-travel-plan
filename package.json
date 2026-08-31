@@ -8,6 +8,9 @@
     "create-workspace": "node scripts/create_fact_workspace.mjs",
     "create-queue": "node scripts/create_reading_queue.mjs",
     "create-digest": "node scripts/create_source_digest_workspace.mjs",
+    "create-read-log": "node scripts/create_read_log.mjs",
+    "validate-digest": "node scripts/validate_source_digest.mjs",
+    "apply-digest": "node scripts/apply_source_digest_to_facts.mjs",
     "render": "node scripts/render_travel_html.mjs",
     "verify": "node scripts/verify_output.mjs"
   },

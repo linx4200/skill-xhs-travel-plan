@@ -48,6 +48,7 @@ function asList(value) {
  */
 function textOf(item) {
   if (item && typeof item === "object" && !Array.isArray(item)) {
+    if (Object.hasOwn(item, "text")) return String(item.text ?? "");
     for (const key of ["text", "summary", "name", "title"]) {
       if (item[key]) return String(item[key]);
     }

@@ -22,6 +22,7 @@ function parseArgs(argv) {
     model: "",
     readingQueue: "",
     sourceDigest: "",
+    readLog: "",
     skillRoot: SKILL_ROOT,
   };
 
@@ -39,6 +40,7 @@ function parseArgs(argv) {
     else if (arg === "--model") args.model = argv[++i];
     else if (arg === "--reading-queue") args.readingQueue = argv[++i];
     else if (arg === "--source-digest") args.sourceDigest = argv[++i];
+    else if (arg === "--read-log") args.readLog = argv[++i];
     else if (arg === "--skill-root") args.skillRoot = argv[++i];
     else throw new Error(`Unexpected argument: ${arg}`);
   }
@@ -142,6 +144,7 @@ function buildInitialConfig(args, paths) {
       provided_facts_workspace: resolveMaybe(args.facts) || null,
       reading_queue: resolveMaybe(args.readingQueue) || null,
       source_digest: resolveMaybe(args.sourceDigest) || null,
+      read_log: resolveMaybe(args.readLog) || null,
     },
     outputs: {
       run_dir: paths.runDir,
@@ -149,7 +152,10 @@ function buildInitialConfig(args, paths) {
       run_config: paths.runConfig,
       cost_metrics: paths.costMetrics,
       quality_metrics: paths.qualityMetrics,
+      read_log: paths.readLog,
       stage_timings: paths.stageTimings,
+      source_digest_validation: paths.sourceDigestValidation,
+      source_digest_applied_facts: paths.sourceDigestAppliedFacts,
       resource_index: null,
       facts_workspace: null,
     },
@@ -186,7 +192,10 @@ function main() {
     runConfig: path.join(runDir, "run-config.json"),
     costMetrics: path.join(runDir, "cost-metrics.json"),
     qualityMetrics: path.join(runDir, "quality-metrics.json"),
+    readLog: path.join(runDir, "read-log.json"),
     stageTimings: path.join(runDir, "stage-timings.json"),
+    sourceDigestValidation: path.join(runDir, "source-digest-validation.json"),
+    sourceDigestAppliedFacts: path.join(runDir, "facts-workspace.digest-applied.json"),
   };
 
   failIfMissing("route-structure.json", paths.route);
@@ -241,6 +250,73 @@ function main() {
   config.updated_at = new Date().toISOString();
   writeJson(paths.runConfig, config);
 
+  const sourceDigest = existingPath([
+    resolveMaybe(args.sourceDigest),
+    path.join(workDir, "source-digest.json"),
+    path.join(runDir, "source-digest.json"),
+  ]);
+  let readLog = existingPath([
+    resolveMaybe(args.readLog),
+    path.join(workDir, "read-log.json"),
+    path.join(runDir, "read-log.json"),
+  ]);
+
+  if (args.variant === "source_digest") {
+    failIfMissing("source-digest.json", sourceDigest);
+    const validateDigestArgs = [
+      "scripts/validate_source_digest.mjs",
+      "--digest",
+      sourceDigest,
+      "--facts",
+      facts,
+      "-o",
+      paths.sourceDigestValidation,
+    ];
+    const timing = recordStage(runCommand("validate_digest", process.execPath, validateDigestArgs, { cwd: path.resolve(args.skillRoot) }));
+    if (timing.exit_code !== 0) throw new Error(`source digest validation failed. See ${paths.stageTimings}`);
+
+    const applyDigestArgs = [
+      "scripts/apply_source_digest_to_facts.mjs",
+      "--digest",
+      sourceDigest,
+      "--facts",
+      facts,
+      "-o",
+      paths.sourceDigestAppliedFacts,
+    ];
+    const applyTiming = recordStage(runCommand("apply_digest_to_facts", process.execPath, applyDigestArgs, { cwd: path.resolve(args.skillRoot) }));
+    if (applyTiming.exit_code !== 0) throw new Error(`source digest application failed. See ${paths.stageTimings}`);
+    facts = paths.sourceDigestAppliedFacts;
+    config.outputs.facts_workspace = facts;
+    config.updated_at = new Date().toISOString();
+    writeJson(paths.runConfig, config);
+
+    if (!readLog) {
+      const createReadLogArgs = [
+        "scripts/create_read_log.mjs",
+        "--index",
+        resourceIndex,
+        "--digest",
+        sourceDigest,
+        "-o",
+        paths.readLog,
+      ];
+      const readLogTiming = recordStage(runCommand("create_read_log", process.execPath, createReadLogArgs, { cwd: path.resolve(args.skillRoot) }));
+      if (readLogTiming.exit_code !== 0) throw new Error(`read log creation failed. See ${paths.stageTimings}`);
+      readLog = paths.readLog;
+      config.inputs.read_log = null;
+      config.outputs.read_log = readLog;
+      config.updated_at = new Date().toISOString();
+      writeJson(paths.runConfig, config);
+    }
+  }
+
+  const renderArgs = ["scripts/render_travel_html.mjs", facts, "-o", htmlOutputDir, "--skill-root", path.resolve(args.skillRoot)];
+  let timing = recordStage(runCommand("render", process.execPath, renderArgs, { cwd: path.resolve(args.skillRoot) }));
+  if (timing.exit_code !== 0) throw new Error(`render failed. See ${paths.stageTimings}`);
+
+  timing = recordStage(runCommand("verify", process.execPath, ["scripts/verify_output.mjs", htmlOutputDir], { cwd: path.resolve(args.skillRoot) }));
+
   const assessSourceArgs = [
     "script/assessment/assess_sources.mjs",
     "--index",
@@ -251,15 +327,10 @@ function main() {
     paths.costMetrics,
   ];
   maybeAddPathArg(assessSourceArgs, "--reading-queue", resolveMaybe(args.readingQueue));
-  maybeAddPathArg(assessSourceArgs, "--source-digest", resolveMaybe(args.sourceDigest));
-  let timing = recordStage(runCommand("assess_sources", process.execPath, assessSourceArgs, { cwd: path.resolve(args.skillRoot) }));
+  maybeAddPathArg(assessSourceArgs, "--source-digest", sourceDigest);
+  maybeAddPathArg(assessSourceArgs, "--read-log", readLog);
+  timing = recordStage(runCommand("assess_sources", process.execPath, assessSourceArgs, { cwd: path.resolve(args.skillRoot) }));
   if (timing.exit_code !== 0) throw new Error(`source assessment failed. See ${paths.stageTimings}`);
-
-  const renderArgs = ["scripts/render_travel_html.mjs", facts, "-o", htmlOutputDir, "--skill-root", path.resolve(args.skillRoot)];
-  timing = recordStage(runCommand("render", process.execPath, renderArgs, { cwd: path.resolve(args.skillRoot) }));
-  if (timing.exit_code !== 0) throw new Error(`render failed. See ${paths.stageTimings}`);
-
-  timing = recordStage(runCommand("verify", process.execPath, ["scripts/verify_output.mjs", htmlOutputDir], { cwd: path.resolve(args.skillRoot) }));
 
   const assessQualityArgs = [
     "script/assessment/assess_quality.mjs",

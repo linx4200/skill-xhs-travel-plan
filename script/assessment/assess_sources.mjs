@@ -9,6 +9,7 @@ function parseArgs(argv) {
     out: "",
     readingQueue: "",
     sourceDigest: "",
+    readLog: "",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -17,13 +18,14 @@ function parseArgs(argv) {
     else if (arg === "--facts") args.facts = argv[++i];
     else if (arg === "--reading-queue") args.readingQueue = argv[++i];
     else if (arg === "--source-digest") args.sourceDigest = argv[++i];
+    else if (arg === "--read-log") args.readLog = argv[++i];
     else if (arg === "-o" || arg === "--out") args.out = argv[++i];
     else throw new Error(`Unexpected argument: ${arg}`);
   }
 
   if (!args.index || !args.facts || !args.out) {
     throw new Error(
-      "Usage: node script/assessment/assess_sources.mjs --index <resource-index.json> --facts <facts-workspace.json> [-o <cost-metrics.json>] [--reading-queue <reading-queue.json>] [--source-digest <source-digest.json>]",
+      "Usage: node script/assessment/assess_sources.mjs --index <resource-index.json> --facts <facts-workspace.json> [-o <cost-metrics.json>] [--reading-queue <reading-queue.json>] [--source-digest <source-digest.json>] [--read-log <read-log.json>]",
     );
   }
 
@@ -178,13 +180,21 @@ function optionalSourceMetrics(args, lookup) {
     args.readingQueue || firstExistingJson(candidateJsonPaths(args, "reading-queue.json"));
   const sourceDigestPath =
     args.sourceDigest || firstExistingJson(candidateJsonPaths(args, "source-digest.json"));
+  const readLogPath =
+    args.readLog || firstExistingJson(candidateJsonPaths(args, "read-log.json"));
 
   const metrics = {
     reading_queue_file_count: null,
     reading_queue_chars: null,
     source_digest_file_count: null,
     source_digest_reviewed_count: null,
+    digest_review_completion: null,
     source_digest_fact_count: null,
+    read_log_event_count: null,
+    full_file_read_count: null,
+    unique_loaded_file_count: null,
+    actual_loaded_chars: null,
+    actual_loaded_tokens_estimated: null,
   };
   const inputs = {};
   const warnings = [];
@@ -207,12 +217,31 @@ function optionalSourceMetrics(args, lookup) {
   const sourceDigest = maybeReadJson(sourceDigestPath);
   if (sourceDigest) {
     const files = digestFiles(sourceDigest);
+    const reviewedCount = files.filter((file) => file?.reviewed === true).length;
     metrics.source_digest_file_count = files.length;
-    metrics.source_digest_reviewed_count = files.filter((file) => file?.reviewed === true).length;
+    metrics.source_digest_reviewed_count = reviewedCount;
+    metrics.digest_review_completion = files.length > 0 ? Number((reviewedCount / files.length).toFixed(4)) : null;
     metrics.source_digest_fact_count = files.reduce((total, file) => total + countDigestFacts(file?.facts), 0);
     inputs.source_digest = path.resolve(sourceDigestPath);
   } else if (sourceDigestPath) {
     warnings.push(`source_digest_not_found: ${sourceDigestPath}`);
+  }
+
+  const readLog = maybeReadJson(readLogPath);
+  if (readLog) {
+    const events = Array.isArray(readLog.events) ? readLog.events : [];
+    const fullFileEvents = events.filter((event) => event?.mode === "full_file");
+    metrics.read_log_event_count = events.length;
+    metrics.full_file_read_count = fullFileEvents.length;
+    metrics.unique_loaded_file_count = new Set(events.map((event) => normalizeSourcePath(event?.path)).filter(Boolean)).size;
+    metrics.actual_loaded_chars = events.reduce((total, event) => total + numberOrZero(event?.chars), 0);
+    metrics.actual_loaded_tokens_estimated = events.reduce((total, event) => {
+      if (Number.isFinite(Number(event?.tokens_estimated))) return total + Number(event.tokens_estimated);
+      return total + Math.ceil(numberOrZero(event?.chars) / 1.5);
+    }, 0);
+    inputs.read_log = path.resolve(readLogPath);
+  } else if (readLogPath) {
+    warnings.push(`read_log_not_found: ${readLogPath}`);
   }
 
   return { metrics, inputs, warnings };

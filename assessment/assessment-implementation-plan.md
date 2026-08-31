@@ -260,6 +260,23 @@ source digest 流程中，读取 queue 时可以让 agent 或辅助脚本记录�
 - RAG 的 `fallback_full_file_reads`
 - RAG 的 `fallback_full_file_chars`
 
+执行记录（2026-08-31）：
+
+- 已新增 `scripts/create_read_log.mjs` 和 `npm run create-read-log`。
+- 脚本支持从 `--digest <source-digest.json>` 生成读取日志；默认只记录 `reviewed=true` 的文件，并把事件标记为 `inferred=true` / `inferred_from=source_digest.reviewed_files`。
+- 也支持从 `--queue <reading-queue.json>` 生成计划读取日志，用于还没有 digest 时估算完整队列阅读成本。
+- 已修改 `script/assessment/assess_sources.mjs`，支持 `--read-log <read-log.json>`，并输出 `read_log_event_count`、`full_file_read_count`、`unique_loaded_file_count`、`actual_loaded_chars`、`actual_loaded_tokens_estimated`。
+- 已修改 `script/assessment/assess_run.mjs`，支持 `--read-log`；`source_digest` variant 如果没有显式传入 read log，会从已 review 的 source digest 自动生成一份推断日志并纳入成本评估。
+
+### 阶段 5.1：收紧 reading queue 路线范围过滤
+
+执行记录（2026-08-31）：
+
+- 已修改 `scripts/create_reading_queue.mjs`，对城市 `source_files` 增加路线范围过滤。
+- 过滤只作用于城市消费者：如果某个城市来源文件的路径/标题明确指向路线外地点，且没有命中本次 `route_places`，则跳过该城市 source ref。
+- 队列输出新增 `stats.input_source_refs`、`stats.filtered_source_refs`、`stats.filtered_unique_files` 和 `filtered_refs[]`，保留被过滤明细，方便人工恢复边界案例。
+- 景点消费者不受该过滤影响；命中本次路线景点的文件仍会进入队列。
+
 ### 阶段 6：增加 RAG 检索日志
 
 RAG 上线时，每次检索都必须写日志，否则无法判断省 token 是否来自真实少读。
