@@ -79,6 +79,10 @@
 - `stats.unique_source_chars`：去重后文件的字符数总和。
 - `stats.repeated_source_chars`：按引用重复累计的字符数总和。
 - `stats.read_amplification`：重复读取放大倍数。
+- `stats.input_source_refs`：过滤前从 facts 收集到的 source 引用次数。
+- `stats.filtered_source_refs`：被路线范围过滤跳过的城市 source 引用次数。
+- `stats.filtered_unique_files`：被过滤引用涉及的唯一文件数。
+- `filtered_refs[]`：被过滤的引用明细；用于人工判断是否需要恢复某个路线外城市素材。
 - `files[].path`：相对输入材料文件夹的文本文件路径。
 - `files[].title`、`kind`、`char_count`、`candidate_places`、`candidate_cities`、`keywords`：来自 `resource-index.json` 的素材元数据。
 - `files[].consumers`：该文件服务的目标列表；每项包含 `type`、`name` 和 `reason`。
@@ -104,6 +108,29 @@
 - `files[].facts`：该文件中可分发到地点、城市、每日提醒或全局字段的事实项；每项应标明 `target_type`、`target_name`、`field` 和 `items`。可选保留短 `evidence`，只用于复核，不进入最终正文。
 - `files[].conflicts`：该文件暴露的事实冲突或待复核线索。
 - `files[].global_notes`：不只归属单个地点或城市的全局提醒。
+
+## read-log.json
+
+`read-log.json` 记录本次运行中实际或可审计推断的材料读取事件，用于计算 `actual_loaded_chars` 和 `actual_loaded_tokens_estimated`。如果由 `source-digest.json` 中 `reviewed=true` 的文件生成，事件会标记 `inferred=true`，表示它来自已完成 digest review 的推断日志，而不是底层工具自动埋点。
+
+重要字段：
+
+- `schema_version`：数据结构版本。
+- `generated_at`：日志生成时间。
+- `source.kind`：日志来源，例如 `source_digest` 或 `reading_queue`。
+- `source.path`：生成日志时使用的上游文件路径。
+- `stats.event_count`：读取事件数量。
+- `stats.full_file_read_count`：完整原文读取事件数量。
+- `stats.unique_loaded_file_count`：去重后的读取文件数。
+- `stats.actual_loaded_chars`：所有读取事件的字符数累计。
+- `stats.actual_loaded_tokens_estimated`：估算输入 token 数。
+- `events[].path`：被读取的原文文件路径。
+- `events[].mode`：读取模式；当前支持 `full_file`，后续 RAG 可扩展为 `chunk`。
+- `events[].chars`：该次读取进入上下文的字符数。
+- `events[].tokens_estimated`：该次读取的估算 token 数。
+- `events[].reason`：读取原因，例如 `source_digest_review`、`rag_fallback_full_file`。
+- `events[].targets`：该文件服务的地点或城市目标。
+- `events[].inferred` 和 `events[].inferred_from`：是否由上游结构推断生成，以及推断来源。
 
 ## facts-workspace.json
 

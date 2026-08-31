@@ -135,15 +135,76 @@ function collectSourceRefs(facts) {
 }
 
 /**
+ * 从 facts-workspace 中提取本次路线明确包含的 route_places。
+ */
+function routePlacesFromFacts(facts) {
+  const places = Object.keys(facts.places ?? {});
+  for (const day of asList(facts.trip?.days)) {
+    places.push(...asList(day?.route_places));
+  }
+  return uniqueStrings(places);
+}
+
+/**
+ * 判断文本中是否出现某个名称的明确别名。
+ */
+function textMentionsName(text, name) {
+  return nameAliases(name).some((alias) => alias && String(text ?? "").includes(alias));
+}
+
+/**
+ * 从路径和标题里提取可能表示具体地点的中文片段。
+ */
+function cjkNameHints(meta) {
+  const text = `${meta?.path ?? ""} ${meta?.title ?? ""}`;
+  return uniqueStrings(text.match(/[\u4e00-\u9fff]{2,}/g) ?? []);
+}
+
+const GENERIC_CJK_HINTS = new Set(["评论", "下载", "攻略", "笔记", "视频", "信息", "整理", "素材"]);
+
+/**
+ * 城市 source_files 容易把同城但路线外的景点笔记带进队列。
+ * 若文件名/标题明确指向路线外地点，且没有命中本次 route_places，则跳过该城市消费者。
+ */
+function offRouteCityOnlyReason(ref, meta, routePlaces, cityNames) {
+  if (ref.type !== "city" || !meta || routePlaces.length === 0) return "";
+
+  const searchable = `${meta.path ?? ""} ${meta.title ?? ""} ${meta.excerpt ?? ""}`;
+  if (routePlaces.some((place) => textMentionsName(searchable, place))) return "";
+  if ((meta.candidate_places ?? []).some((candidate) => routePlaces.some((place) => relatedName(place, candidate)))) return "";
+
+  const cityAliases = cityNames.flatMap(nameAliases);
+  const hints = cjkNameHints(meta).filter((hint) => {
+    if (hint.length < 3 || GENERIC_CJK_HINTS.has(hint)) return false;
+    return !cityAliases.some((cityAlias) => hint === cityAlias || hint.includes(cityAlias));
+  });
+  if (hints.length === 0) return "";
+
+  return `off_route_city_source:${hints.join("/")}`;
+}
+
+/**
  * 按唯一文件构建 agent 阅读队列，并聚合每个文件服务的地点和城市。
  */
 function buildQueue(index, facts, sourcePaths) {
   const metas = indexByPath(index);
   const filesByPath = new Map();
   let repeatedSourceChars = 0;
+  let keptSourceRefs = 0;
+  const filteredRefs = [];
+  const sourceRefs = collectSourceRefs(facts);
+  const routePlaces = routePlacesFromFacts(facts);
+  const cityNames = uniqueStrings(Object.keys(facts.cities ?? {}));
 
-  for (const ref of collectSourceRefs(facts)) {
+  for (const ref of sourceRefs) {
     const meta = metas.get(ref.path);
+    const filterReason = offRouteCityOnlyReason(ref, meta, routePlaces, cityNames);
+    if (filterReason) {
+      filteredRefs.push({ ...ref, reason: filterReason, char_count: Number(meta?.char_count ?? 0) });
+      continue;
+    }
+
+    keptSourceRefs += 1;
     repeatedSourceChars += Number(meta?.char_count ?? 0);
     if (!filesByPath.has(ref.path)) {
       filesByPath.set(ref.path, {
@@ -168,7 +229,6 @@ function buildQueue(index, facts, sourcePaths) {
 
   const files = [...filesByPath.values()];
   const uniqueSourceChars = files.reduce((sum, item) => sum + item.char_count, 0);
-  const sourceRefs = collectSourceRefs(facts).length;
   const missingIndexFiles = files.filter((item) => !metas.has(item.path)).map((item) => item.path);
 
   return {
@@ -180,13 +240,17 @@ function buildQueue(index, facts, sourcePaths) {
       facts_workspace: sourcePaths.facts,
     },
     stats: {
-      source_refs: sourceRefs,
+      input_source_refs: sourceRefs.length,
+      source_refs: keptSourceRefs,
+      filtered_source_refs: filteredRefs.length,
+      filtered_unique_files: new Set(filteredRefs.map((ref) => ref.path)).size,
       unique_files: files.length,
       unique_source_chars: uniqueSourceChars,
       repeated_source_chars: repeatedSourceChars,
       read_amplification: uniqueSourceChars > 0 ? Number((repeatedSourceChars / uniqueSourceChars).toFixed(2)) : 0,
       missing_index_files: missingIndexFiles.length,
     },
+    filtered_refs: filteredRefs,
     files,
   };
 }
@@ -210,6 +274,9 @@ function main() {
   );
   if (queue.stats.missing_index_files > 0) {
     console.log(`Warning: ${queue.stats.missing_index_files} queued files were not found in the resource index.`);
+  }
+  if (queue.stats.filtered_source_refs > 0) {
+    console.log(`Filtered ${queue.stats.filtered_source_refs} off-route city source refs across ${queue.stats.filtered_unique_files} files.`);
   }
 }
 
