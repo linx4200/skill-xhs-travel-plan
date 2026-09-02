@@ -3,6 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { cleanDayTitle } from "./day_title_utils.mjs";
 import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
+import { loadRagIndex } from "./rag_retrieve.mjs";
+
+const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]);
 
 /**
  * 解析命令行参数，得到结构化路线 JSON、素材索引和输出路径。
@@ -11,17 +14,21 @@ function parseArgs(argv) {
   const args = {
     routeJson: "",
     index: "resource-index.json",
+    ragIndex: "",
     out: "facts-workspace.json",
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--route-json") args.routeJson = argv[++i];
     else if (arg === "--index") args.index = argv[++i];
+    else if (arg === "--rag-index") args.ragIndex = argv[++i];
     else if (arg === "-o" || arg === "--out") args.out = argv[++i];
     else throw new Error(`Unexpected argument: ${arg}`);
   }
   if (!args.routeJson) {
-    throw new Error("Usage: node scripts/create_fact_workspace.mjs --route-json <route-structure.json> [--index resource-index.json] [-o facts-workspace.json]");
+    throw new Error(
+      "Usage: node scripts/create_fact_workspace.mjs --route-json <route-structure.json> [--index resource-index.json | --rag-index rag-index.json] [-o facts-workspace.json]",
+    );
   }
   return args;
 }
@@ -31,6 +38,48 @@ function parseArgs(argv) {
  */
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+/**
+ * 把当前系统路径分隔符转换为 POSIX 分隔符，保证 JSON 中路径稳定。
+ */
+function toPosix(value) {
+  return value.split(path.sep).join("/");
+}
+
+/**
+ * 递归遍历目录，返回按中文 locale 排序后的所有文件路径。
+ */
+function walk(root) {
+  const result = [];
+  if (!fs.existsSync(root)) return result;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      result.push(...walk(fullPath));
+    } else if (entry.isFile()) {
+      result.push(fullPath);
+    }
+  }
+  return result.sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
+/**
+ * 扫描 photos/ 目录，把本地照片按目录归属整理成索引。
+ */
+function scanPhotos(root) {
+  const photosRoot = path.join(root, "photos");
+  const photos = {};
+  if (!fs.existsSync(photosRoot)) return photos;
+  for (const filePath of walk(photosRoot)) {
+    if (!IMAGE_EXTS.has(path.extname(filePath).toLowerCase())) continue;
+    const rel = toPosix(path.relative(root, filePath));
+    const parts = rel.split("/");
+    const place = parts.length > 2 && parts[0] === "photos" ? parts[1] : path.basename(path.dirname(filePath));
+    photos[place] ??= [];
+    photos[place].push(rel);
+  }
+  return photos;
 }
 
 /**
@@ -51,6 +100,43 @@ function uniqueStrings(values) {
     if (text && !result.includes(text)) result.push(text);
   }
   return result;
+}
+
+/**
+ * 将 RAG index 适配成 facts skeleton 所需的最小素材索引。
+ */
+function indexFromRag(ragIndexPath) {
+  const ragIndex = loadRagIndex(ragIndexPath);
+  const filesByPath = new Map();
+  for (const chunk of ragIndex.chunks ?? []) {
+    const sourcePath = String(chunk.resource_path || chunk.source_uri || chunk.chunk_id || "").replace(/^\.?\/*resources\//, "");
+    if (!sourcePath) continue;
+    const existing = filesByPath.get(sourcePath) ?? {
+      path: sourcePath,
+      title: chunk.title || sourcePath,
+      kind: "rag-note",
+      char_count: 0,
+      candidate_places: [],
+      candidate_cities: [],
+      keywords: [],
+      excerpt: "",
+    };
+    existing.char_count += String(chunk.text ?? "").length;
+    existing.candidate_places = uniqueStrings([...existing.candidate_places, ...(chunk.candidate_places ?? [])]);
+    existing.candidate_cities = uniqueStrings([...existing.candidate_cities, ...(chunk.candidate_cities ?? [])]);
+    existing.keywords = uniqueStrings([...existing.keywords, ...(chunk.keywords ?? [])]);
+    if (!existing.excerpt && chunk.text) existing.excerpt = String(chunk.text).replace(/\s+/g, " ").trim().slice(0, 180);
+    filesByPath.set(sourcePath, existing);
+  }
+
+  const resourceRoot = String(ragIndex.resource_root ?? path.dirname(path.resolve(ragIndexPath)));
+  return {
+    source_kind: "rag-index",
+    rag_index: path.basename(ragIndexPath),
+    resource_root: resourceRoot,
+    files: [...filesByPath.values()].sort((a, b) => a.path.localeCompare(b.path, "zh-CN")),
+    photos: scanPhotos(resourceRoot),
+  };
 }
 
 /**
@@ -192,8 +278,9 @@ function buildFacts(index, routeStructure) {
     title: String(routeStructure.title ?? ""),
     source: {
       resource_root: index.resource_root ?? "",
-      resource_index: "resource-index.json",
+      resource_index: index.source_kind === "rag-index" ? "" : "resource-index.json",
       route_structure: "route-structure.json",
+      ...(index.rag_index ? { rag_index: index.rag_index } : {}),
     },
     trip: {
       mode: String(routeStructure.mode ?? "unknown"),
@@ -211,7 +298,7 @@ function buildFacts(index, routeStructure) {
  */
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const index = readJson(args.index);
+  const index = args.ragIndex ? indexFromRag(args.ragIndex) : readJson(args.index);
   const routeStructure = readJson(args.routeJson);
   const facts = buildFacts(index, routeStructure);
   fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
