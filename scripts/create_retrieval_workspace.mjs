@@ -286,7 +286,7 @@ export function createRetrievalWorkspace(factsPath, ragIndexPath, options = {}) 
       max_place_chunks: maxPlaceChunks,
       max_city_chunks: maxCityChunks,
       scoring: {
-        strategy: "keyword_entity_title",
+        strategy: "entity_gated_keyword_entity_title",
         weights: {
           keyword_match: 0.45,
           route_entity_match: 0.35,

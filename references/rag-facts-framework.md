@@ -423,8 +423,8 @@ unresolved high-risk fields or conflicts
 
     // 可选：记录检索排序策略，方便后续复现实验。
     "scoring": {
-      // 当前 MVP 使用确定性关键词/实体/标题来源排序，不在检索时调用 embedding API。
-      "strategy": "keyword_entity_title",
+      // 当前 MVP 使用实体归属门控 + 确定性关键词/实体/标题来源排序，不在检索时调用 embedding API。
+      "strategy": "entity_gated_keyword_entity_title",
 
       // 当前推荐权重。实际以 rag_retrieve.mjs 实现为准。
       "weights": {

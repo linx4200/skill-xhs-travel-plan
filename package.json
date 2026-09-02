@@ -15,7 +15,8 @@
     "rag:retrieve": "node scripts/rag_retrieve.mjs",
     "rag:workspace": "node scripts/create_retrieval_workspace.mjs",
     "render": "node scripts/render_travel_html.mjs",
-    "verify": "node scripts/verify_output.mjs"
+    "verify": "node scripts/verify_output.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "ejs": "^6.0.1"
