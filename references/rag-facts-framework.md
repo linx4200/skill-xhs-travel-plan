@@ -423,8 +423,8 @@ unresolved high-risk fields or conflicts
 
     // 可选：记录检索排序策略，方便后续复现实验。
     "scoring": {
-      // 当前 MVP 使用实体归属门控 + 确定性关键词/实体/标题来源排序，不在检索时调用 embedding API。
-      "strategy": "entity_gated_keyword_entity_title",
+      // 当前 MVP 使用 candidate 归属门控 + 确定性关键词/实体/标题来源排序，不在检索时调用 embedding API。
+      "strategy": "candidate_gated_keyword_entity_title",
 
       // 当前推荐权重。实际以 rag_retrieve.mjs 实现为准。
       "weights": {
@@ -720,14 +720,14 @@ unresolved high-risk fields or conflicts
 
 - `unique_chunk_ids` 是初次阅读顺序。agent 应按这个数组读取顶层 `chunks_by_id` 的 chunk 原文，避免同一 note 因多个 theme 命中而被重复阅读。
 - `themes` 是字段定位索引。补 `tickets`、`transport`、`routes`、`safety` 等字段时，优先查看对应 theme，但仍要回到 chunk 原文判断上下文和地点归属。
-- `matched_by` 包含 `candidate_places` 的结果优先级通常高于只靠 keyword 命中的结果；但如果原文明确讨论目标地点，只靠 keyword 命中也可以采纳。
+- 地点检索只读取 `candidate_places` 命中目标地点的 chunks；`matched_by` 只靠 `keyword` 的结果不应进入地点命中池。
 - 同一事实在多个 chunk 中重复出现时，只写一次，保留更具体、更可执行的表达。
 - 同一事实存在执行层面的冲突时，不强行合并；写入 `conflicts`，并在当天 `confirmations` 或顶层 `confirm_before_departure` 中保留需要出行前确认的事项。
 
 城市填充规则：
 
 - 城市固定在所有地点之后处理。原因是城市页是否有独立增量价值，必须先排除已经被地点页、每日页、全局提醒或确认清单吸收的内容。
-- 城市检索通常更泛。agent 应优先采纳 `matched_by` 包含 `candidate_cities`，且内容确实服务本次路线吃住行、补给、风险或备选点判断的 chunks。
+- 城市检索只读取 `candidate_cities` 命中目标城市的 chunks，并优先读取没有 `candidate_places` 的城市级 chunks；带具体地点归属的 chunks 只作为城市级材料不足时的补充。
 - `cities.<城市名>.include` 只有在排除重复后仍满足 `info-rules.md` 的城市 include 标准时才设为 `true`。
 - 城市里的 `backup_places` 只能作为备选信息，不得自动加入每日 `route_places` 或改变用户路线。
 
