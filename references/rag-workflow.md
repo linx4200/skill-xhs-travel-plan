@@ -67,7 +67,8 @@ node scripts/create_fact_workspace.mjs \
 node scripts/create_retrieval_workspace.mjs \
   --facts <工作目录>/facts-workspace.json \
   --rag-index <rag-index.json> \
-  -o <工作目录>/retrieval-workspace.json
+  -o <工作目录>/retrieval-workspace.json \
+  --log <工作目录>/retrieval-log.json
 ```
 
 `retrieval-workspace.json` 应包含：
@@ -76,6 +77,8 @@ node scripts/create_retrieval_workspace.mjs \
 - `places.<地点名>.target`、`unique_chunk_ids`、`retrieval_health` 和 `themes`。
 - `cities.<城市名>.target`、`unique_chunk_ids`、`retrieval_health` 和 `themes`。
 - `summary.attention_places`、`summary.attention_cities`、`summary.gap_places` 和 `summary.gap_cities`。
+
+`--log` 是可选调试输出。`retrieval-log.json` 按每个 target/theme 记录全量 chunk 评估，包括 entity gate 是否通过、召回状态、candidate rank、selected rank、向量余弦相似度、评分信号、权重和分项贡献。日志不复制完整 embedding 数组；用 `vector_match.cosine_similarity` 和向量维度检查向量匹配。
 
 ## Step 5：填充第一版 Facts Workspace
 
@@ -93,7 +96,7 @@ Agent 读取 `retrieval-workspace.json` 后填充 `facts-workspace.json`：
 
 ## 缺口处理边界
 
-RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`。
+RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`；召回调试信息按需写入 `retrieval-log.json`。
 
 以下情况不应继续无限 RAG 检索，应在后续步骤中转为定向补检索，或明确写入“材料未说明 / 出行前确认”：
 

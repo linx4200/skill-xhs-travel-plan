@@ -8,12 +8,12 @@ import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
  * 景点级检索主题。每个 theme 对应一组用于关键词召回和排序的中文触发词。
  */
 export const PLACE_THEMES = {
-  highlights: ["看点", "体验", "推荐", "出片"],
+  highlights: ["推荐", "看点", "体验", "出片"],
   drawbacks: ["缺点", "避坑", "差评", "坑", "不推荐"],
-  tickets: ["门票", "预约", "开放", "优惠", "套票", "票价"],
-  transport: ["停车", "入口", "导航", "交通", "自驾", "路况", "游客中心", "包车", "打车"],
-  routes: ["路线", "游船", "徒步", "玩法", "索道", "缆车", "观光车", "步行", "排队", "摆渡车"],
-  safety: ["老人", "小孩", "安全", "温差", "高反", "天气", "海拔", "补给", "厕所"],
+  tickets: ["门票", "票价", "预约", "开放", "优惠", "套票"],
+  transport: ["停车", "入口", "导航", "交通", "路况", "自驾", "游客中心", "包车", "打车"],
+  routes: ["路线", "玩法", "排队", "摆渡车", "徒步", "索道", "游船", "缆车", "观光车", "步行"],
+  safety: ["老人", "小孩", "安全", "补给", "厕所", "温差", "高反", "天气", "海拔", "厕所"],
 };
 
 /**
@@ -24,7 +24,7 @@ export const CITY_THEMES = {
   lodging: ["住宿", "酒店", "民宿"],
   transport: ["停车", "路况", "导航", "限行", "交通", "自驾", "高铁", "大巴", "包车", "打车", "拼车"],
   backup_places: ["备选", "景点", "古城", "观景台"],
-  notes: ["风险", "天气", "海拔", "安全", "温差", "高反", "避坑", "贴士"],
+  notes: ["风险", "避坑", "安全", "贴士", "天气", "海拔", "温差", "高反"],
 };
 
 /**
@@ -37,8 +37,12 @@ function parseArgs(argv) {
     city: "",
     query: "",
     themes: [],
-    topK: 5,
+    topK: 3,
     maxChunks: 20,
+    embeddingUrl: "",
+    embeddingModel: "",
+    noEmbedding: false,
+    log: "",
     json: false,
   };
 
@@ -51,6 +55,10 @@ function parseArgs(argv) {
     else if (arg === "--theme") args.themes.push(argv[++i]);
     else if (arg === "--top-k") args.topK = Number(argv[++i]);
     else if (arg === "--max-chunks") args.maxChunks = Number(argv[++i]);
+    else if (arg === "--embedding-url") args.embeddingUrl = argv[++i];
+    else if (arg === "--embedding-model") args.embeddingModel = argv[++i];
+    else if (arg === "--no-embedding") args.noEmbedding = true;
+    else if (arg === "--log") args.log = argv[++i];
     else if (arg === "--json") args.json = true;
     else throw new Error(`Unexpected argument: ${arg}`);
   }
@@ -239,6 +247,206 @@ function matchedBy(chunk, entity, aliases, terms) {
 }
 
 /**
+ * 判断 chunk 是否有可参与余弦相似度计算的向量。
+ */
+function hasEmbedding(chunk) {
+  return Array.isArray(chunk.embedding) && chunk.embedding.length > 0;
+}
+
+/**
+ * 是否应该为本次检索调用 embedding API。
+ */
+function shouldUseEmbeddings(index, options) {
+  if (options.noEmbedding) return false;
+  return asList(index.chunks).some(hasEmbedding);
+}
+
+/**
+ * 返回第一个非空配置值，避免 CLI 默认空字符串遮住环境变量或索引元数据。
+ */
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+/**
+ * 从环境变量和索引元数据中整理 embedding API 配置。
+ */
+function embeddingConfig(index, options) {
+  const model = firstNonEmpty(
+    options.embeddingModel,
+    process.env.RAG_EMBEDDING_MODEL,
+    process.env.EMBEDDING_MODEL,
+    index.embedding?.model,
+  );
+  const url = firstNonEmpty(
+    options.embeddingUrl,
+    process.env.RAG_EMBEDDING_URL,
+    process.env.EMBEDDING_API_URL,
+    "http://localhost:11434/api/embed",
+  );
+  const apiKey = firstNonEmpty(
+    options.embeddingApiKey,
+    process.env.RAG_EMBEDDING_API_KEY,
+    process.env.EMBEDDING_API_KEY,
+    process.env.OPENAI_API_KEY,
+  );
+
+  if (!url) throw new Error("Embedding is enabled, but no embedding API URL is configured.");
+  if (!model || model === "unknown") {
+    throw new Error(
+      "Embedding is enabled, but no embedding model is configured. Use --embedding-model or RAG_EMBEDDING_MODEL.",
+    );
+  }
+  return { url, model, apiKey };
+}
+
+/**
+ * 把不同 embedding API 的响应统一成单条数值向量。
+ *
+ * 支持 Ollama `/api/embed` 的 `{ embeddings: [[...]] }`，旧 `/api/embeddings`
+ * 的 `{ embedding: [...] }`，以及 OpenAI-compatible `{ data: [{ embedding }] }`。
+ */
+function parseEmbeddingResponse(payload) {
+  const vector =
+    (Array.isArray(payload?.embeddings) && payload.embeddings[0]) ||
+    (Array.isArray(payload?.embedding) && payload.embedding) ||
+    (Array.isArray(payload?.data) && payload.data[0]?.embedding) ||
+    (Array.isArray(payload) && payload);
+  if (!Array.isArray(vector) || !vector.length) {
+    throw new Error("Embedding API response did not contain an embedding vector.");
+  }
+  const parsed = vector.map((value) => Number(value));
+  if (parsed.some((value) => !Number.isFinite(value))) {
+    throw new Error("Embedding API response contained non-numeric vector values.");
+  }
+  return parsed;
+}
+
+/**
+ * 调用真实 embedding API 为检索 query 生成向量。
+ */
+async function fetchEmbedding(input, config) {
+  const headers = { "content-type": "application/json" };
+  if (config.apiKey) headers.authorization = `Bearer ${config.apiKey}`;
+  const response = await fetch(config.url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: config.model, input }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Embedding API request failed: ${response.status} ${response.statusText}${body ? ` - ${body}` : ""}`);
+  }
+  return parseEmbeddingResponse(await response.json());
+}
+
+/**
+ * 注入式 embedding client 便于测试；生产默认走 fetchEmbedding。
+ */
+async function queryEmbedding(index, query, options) {
+  if (!shouldUseEmbeddings(index, options)) return [];
+  if (!query.trim()) return [];
+  if (options.queryEmbedding) return parseEmbeddingResponse(options.queryEmbedding);
+  if (options.embeddingClient) {
+    return parseEmbeddingResponse(await options.embeddingClient(query, embeddingConfig(index, options)));
+  }
+  return fetchEmbedding(query, embeddingConfig(index, options));
+}
+
+/**
+ * 余弦相似度。返回 0..1 的非负分，避免负相关结果仅因向量项进入召回。
+ */
+function cosineScore(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || !left.length || left.length !== right.length) return 0;
+  let dot = 0;
+  let leftNorm = 0;
+  let rightNorm = 0;
+  for (let i = 0; i < left.length; i += 1) {
+    const a = Number(left[i]);
+    const b = Number(right[i]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+    dot += a * b;
+    leftNorm += a * a;
+    rightNorm += b * b;
+  }
+  if (!leftNorm || !rightNorm) return 0;
+  return Math.max(0, dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm)));
+}
+
+/**
+ * 保持日志中的小数稳定，避免浮点尾数干扰 diff。
+ */
+function round4(value) {
+  return Number(Number(value).toFixed(4));
+}
+
+/**
+ * 根据是否启用 query embedding 和是否有实体目标选择评分权重。
+ */
+function scoreWeights(hasQueryVector, entity) {
+  if (hasQueryVector) {
+    return entity?.name
+      ? {
+          profile: "entity_query_embedding",
+          weights: {
+            query_embedding_similarity: 0.45,
+            keyword_match: 0.25,
+            route_entity_match: 0.2,
+            title_source_match: 0.1,
+          },
+        }
+      : {
+          profile: "query_only_embedding",
+          weights: {
+            query_embedding_similarity: 0.7,
+            keyword_match: 0.2,
+            title_source_match: 0.1,
+          },
+        };
+  }
+  return entity?.name
+    ? {
+        profile: "entity_query_keyword",
+        weights: {
+          keyword_match: 0.45,
+          route_entity_match: 0.35,
+          title_source_match: 0.2,
+        },
+      }
+    : {
+        profile: "query_only_keyword",
+        weights: {
+          keyword_match: 0.8,
+          title_source_match: 0.2,
+        },
+      };
+}
+
+/**
+ * 展开每个评分分项对总分的贡献，供调试日志复盘。
+ */
+function scoreBreakdown(signals, scoring) {
+  const contributions = {};
+  let total = 0;
+  for (const [name, weight] of Object.entries(scoring.weights)) {
+    const contribution = (signals[name] ?? 0) * weight;
+    contributions[name] = round4(contribution);
+    total += contribution;
+  }
+  return {
+    profile: scoring.profile,
+    weights: scoring.weights,
+    signals: Object.fromEntries(Object.entries(signals).map(([key, value]) => [key, round4(value)])),
+    contributions,
+    total: round4(total),
+  };
+}
+
+/**
  * 输出面向 agent 阅读的检索结果；不暴露内部派生字段。
  */
 function resultForChunk(chunk, score, matches) {
@@ -246,7 +454,7 @@ function resultForChunk(chunk, score, matches) {
     chunk_id: chunk.chunk_id,
     source_uri: chunk.source_uri,
     title: chunk.title,
-    score: Number(score.toFixed(4)),
+    score: round4(score),
     matched_by: matches,
     candidate_places: chunk.candidate_places,
     candidate_cities: chunk.candidate_cities,
@@ -256,17 +464,26 @@ function resultForChunk(chunk, score, matches) {
 }
 
 /**
- * 综合评分。MVP 不调用 embedding API，先用关键词、实体和标题来源做确定性排序。
+ * 综合评分。优先使用真实 embedding 相似度，同时保留关键词、实体和标题来源做可解释排序兜底。
  */
-function scoreChunk(chunk, entity, aliases, terms) {
+function scoreChunk(chunk, entity, aliases, terms, queryVector) {
   const keyword = keywordScore(chunk, terms);
   const routeEntity = entityScore(chunk, entity, aliases);
   const titleSource = titleSourceScore(chunk, aliases);
-  const baseScore = 0.45 * keyword + 0.35 * routeEntity + 0.2 * titleSource;
-  const score = entity?.name ? baseScore : 0.8 * keyword + 0.2 * titleSource;
+  const embedding = cosineScore(queryVector, chunk.embedding);
+  const signals = {
+    query_embedding_similarity: embedding,
+    keyword_match: keyword,
+    route_entity_match: routeEntity,
+    title_source_match: titleSource,
+  };
+  const breakdown = scoreBreakdown(signals, scoreWeights(queryVector.length > 0, entity));
+  const matches = matchedBy(chunk, entity, aliases, terms);
+  if (embedding > 0) matches.push("embedding");
   return {
-    score,
-    matches: matchedBy(chunk, entity, aliases, terms),
+    score: breakdown.total,
+    matches,
+    breakdown,
   };
 }
 
@@ -292,6 +509,24 @@ function passesEntityGate(chunk, entity) {
   if (entity.type === "place") return candidatePlaceMatched(chunk, entity.name);
   if (entity.type === "city") return candidateCityMatched(chunk, entity.name);
   return false;
+}
+
+/**
+ * 记录实体 gate 的具体原因，便于解释 chunk 为什么没有进入候选池。
+ */
+function entityGate(chunk, entity) {
+  if (!entity?.name) return { passed: true, reason: "query_only_no_entity_gate" };
+  if (entity.type === "place") {
+    return candidatePlaceMatched(chunk, entity.name)
+      ? { passed: true, reason: "candidate_places_match" }
+      : { passed: false, reason: "candidate_places_miss" };
+  }
+  if (entity.type === "city") {
+    return candidateCityMatched(chunk, entity.name)
+      ? { passed: true, reason: "candidate_cities_match" }
+      : { passed: false, reason: "candidate_cities_miss" };
+  }
+  return { passed: false, reason: "unknown_entity_type" };
 }
 
 /**
@@ -322,9 +557,88 @@ function compareResultsForEntity(left, right, entity) {
 }
 
 /**
+ * 日志只记录向量可解释摘要，不复制完整 embedding 数组，避免文件过大。
+ */
+function vectorTrace(queryVector, chunk, similarity) {
+  return {
+    used: queryVector.length > 0,
+    query_dimensions: queryVector.length,
+    chunk_dimensions: Array.isArray(chunk.embedding) ? chunk.embedding.length : 0,
+    chunk_has_embedding: hasEmbedding(chunk),
+    cosine_similarity: round4(similarity),
+  };
+}
+
+/**
+ * 为单个 chunk 生成调试日志项。
+ */
+function diagnosticForRow(row, selectedIds, eligibleRanks) {
+  let recallStatus = "filtered_by_entity_gate";
+  if (row.gate.passed && row.result.score <= 0) recallStatus = "zero_score";
+  else if (selectedIds.has(row.chunk.chunk_id)) recallStatus = "selected";
+  else if (row.gate.passed) recallStatus = "scored_not_selected";
+
+  return {
+    chunk_id: row.chunk.chunk_id,
+    source_uri: row.chunk.source_uri,
+    title: row.chunk.title,
+    gate: row.gate,
+    recall_status: recallStatus,
+    candidate_rank: eligibleRanks.get(row.chunk.chunk_id) ?? null,
+    selected_rank: recallStatus === "selected" ? [...selectedIds].indexOf(row.chunk.chunk_id) + 1 : null,
+    matched_by: row.result.matched_by,
+    vector_match: vectorTrace(row.queryVector, row.chunk, row.scored.breakdown.signals.query_embedding_similarity),
+    score: row.scored.breakdown,
+    candidate_places: row.chunk.candidate_places,
+    candidate_cities: row.chunk.candidate_cities,
+    keywords: row.chunk.keywords,
+  };
+}
+
+/**
+ * 生成单次 retrieve() 的完整调试日志。
+ */
+function retrievalDiagnostics({ index, query, entity, theme, aliases, terms, queryVector, topK, maxChunks, limit, rows, selectedRows, rankedRows }) {
+  const selectedIds = new Set(selectedRows.map((row) => row.chunk.chunk_id));
+  const eligibleRanks = new Map(rankedRows.map((row, index) => [row.chunk.chunk_id, index + 1]));
+  return {
+    query,
+    entity,
+    theme: theme || null,
+    terms,
+    aliases,
+    top_k: topK,
+    max_chunks: maxChunks,
+    returned_limit: limit,
+    index_chunk_count: asList(index.chunks).length,
+    query_embedding: {
+      used: queryVector.length > 0,
+      dimensions: queryVector.length,
+    },
+    chunks: rows.map((row) => diagnosticForRow(row, selectedIds, eligibleRanks)),
+  };
+}
+
+/**
+ * 从 retrieve() 返回值中移除调试日志，避免普通 JSON 输出过大。
+ */
+function withoutDiagnostics(result) {
+  const { diagnostics, ...rest } = result;
+  return rest;
+}
+
+/**
+ * 写出单点检索调试日志。
+ */
+export function writeRetrievalLog(logPath, payload) {
+  fs.mkdirSync(path.dirname(path.resolve(logPath)), { recursive: true });
+  fs.writeFileSync(logPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+/**
  * 检索入口，可被 CLI 和 `create_retrieval_workspace.mjs` 复用。
  */
-export function retrieve(indexOrPath, options = {}) {
+export async function retrieve(indexOrPath, options = {}) {
   const index = typeof indexOrPath === "string" ? loadRagIndex(indexOrPath) : indexOrPath;
   const entity = options.place
     ? { type: "place", name: String(options.place) }
@@ -335,28 +649,57 @@ export function retrieve(indexOrPath, options = {}) {
   const aliases = entityAliases(entity);
   const terms = uniqueStrings([...themeTerms(entity?.type, theme), ...queryTerms(options.query), ...aliases]);
   const query = uniqueStrings([entity?.name, ...themeTerms(entity?.type, theme), options.query]).join(" ");
+  const queryVector = await queryEmbedding(index, query, options);
   const topK = Number(options.topK ?? 5);
   const maxChunks = Number(options.maxChunks ?? 20);
   // 单次 theme 检索最多返回 min(topK, maxChunks) 条。
   // 因此当 topK > maxChunks 时，超出的 K 不会增加该 theme 的候选结果。
   const limit = Math.min(topK, maxChunks);
 
-  const results = index.chunks
-    .filter((chunk) => passesEntityGate(chunk, entity))
-    .map((chunk) => {
-      const scored = scoreChunk(chunk, entity, aliases, terms);
-      return resultForChunk(chunk, scored.score, scored.matches);
-    })
-    .filter((result) => result.score > 0)
-    .sort((left, right) => compareResultsForEntity(left, right, entity))
-    .slice(0, limit);
+  const rows = index.chunks.map((chunk) => {
+    const gate = entityGate(chunk, entity);
+    if (gate.passed !== passesEntityGate(chunk, entity)) {
+      throw new Error(`Internal entity gate mismatch for chunk: ${chunk.chunk_id}`);
+    }
+    const scored = scoreChunk(chunk, entity, aliases, terms, queryVector);
+    return {
+      chunk,
+      gate,
+      scored,
+      queryVector,
+      result: resultForChunk(chunk, scored.score, scored.matches),
+    };
+  });
+  const rankedRows = rows
+    .filter((row) => row.gate.passed && row.result.score > 0)
+    .sort((left, right) => compareResultsForEntity(left.result, right.result, entity));
+  const selectedRows = rankedRows.slice(0, limit);
+  const results = selectedRows.map((row) => row.result);
 
-  return {
+  const output = {
     query,
     entity,
     theme: theme || null,
     results,
   };
+  if (options.includeDiagnostics) {
+    output.diagnostics = retrievalDiagnostics({
+      index,
+      query,
+      entity,
+      theme,
+      aliases,
+      terms,
+      queryVector,
+      topK,
+      maxChunks,
+      limit,
+      rows,
+      selectedRows,
+      rankedRows,
+    });
+  }
+  return output;
 }
 
 /**
@@ -374,30 +717,46 @@ function printText(result) {
 /**
  * CLI 入口：支持一次传多个 `--theme`，JSON 模式下输出稳定结构。
  */
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   const themes = args.themes.length ? args.themes : [""];
-  const requests = themes.map((theme) =>
-    retrieve(args.ragIndex, {
-      place: args.place,
-      city: args.city,
-      query: args.query,
-      theme,
-      topK: args.topK,
-      maxChunks: args.maxChunks,
-    }),
-  );
-  const output = requests.length === 1 ? requests[0] : { requests };
+  const requests = [];
+  for (const theme of themes) {
+    requests.push(
+      await retrieve(args.ragIndex, {
+        place: args.place,
+        city: args.city,
+        query: args.query,
+        theme,
+        topK: args.topK,
+        maxChunks: args.maxChunks,
+        embeddingUrl: args.embeddingUrl,
+        embeddingModel: args.embeddingModel,
+        noEmbedding: args.noEmbedding,
+        includeDiagnostics: Boolean(args.log),
+      }),
+    );
+  }
+  if (args.log) {
+    writeRetrievalLog(args.log, {
+      schema_version: 1,
+      source: {
+        rag_index: path.resolve(args.ragIndex),
+      },
+      request_count: requests.length,
+      requests: requests.map((request) => request.diagnostics),
+    });
+  }
+  const outputRequests = args.log ? requests.map(withoutDiagnostics) : requests;
+  const output = outputRequests.length === 1 ? outputRequests[0] : { requests: outputRequests };
   if (args.json) console.log(JSON.stringify(output, null, 2));
   else if (requests.length === 1) printText(requests[0]);
   else for (const request of requests) printText(request);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     console.error(error.message);
     process.exit(1);
-  }
+  });
 }

@@ -8,8 +8,12 @@
 ```bash
 npm install
 npm run create-workspace -- --route-json <工作目录>/route-structure.json --rag-index <rag-index.json> -o <工作目录>/facts-workspace.json
-npm run rag:workspace -- --facts <工作目录>/facts-workspace.json --rag-index <rag-index.json> -o <工作目录>/retrieval-workspace.json
+npm run rag:workspace -- --facts <工作目录>/facts-workspace.json --rag-index <rag-index.json> -o <工作目录>/retrieval-workspace.json --log <工作目录>/retrieval-log.json
 ```
+
+`rag:retrieve` / `rag:workspace` 会在 `rag-index.json` 的 chunks 含有 `embedding` 向量时调用真实 embedding API 生成查询向量。默认接口为 `http://localhost:11434/api/embed`，模型优先读取 `rag-index.json` 的 `embedding.model`，也可用 `--embedding-url`、`--embedding-model` 或环境变量 `RAG_EMBEDDING_URL`、`RAG_EMBEDDING_MODEL` 覆盖。需要临时关闭向量排序时传 `--no-embedding`。
+
+需要检查召回原因时传 `--log <工作目录>/retrieval-log.json`。日志会按每个 target/theme 记录所有 chunk 的 entity gate、召回状态、向量余弦相似度、分项得分权重和贡献；不会复制完整 embedding 数组。
 
 随后 agent 读取 `retrieval-workspace.json`，按地点、城市和主题整理 `facts-patch.json`，再合并、检查、渲染：
 
@@ -19,7 +23,7 @@ npm run render -- <工作目录>/facts-workspace.json -o <输出目录>
 npm run verify -- <输出目录>
 ```
 
-RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`。
+RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`；检索调试信息按需写入 `retrieval-log.json`。
 
 没有 `rag-index.json` 时，完整 HTML 攻略优先走结构化流程，减少反复读取素材和手写 HTML。先按 `SKILL.md`、`references/info-rules.md`、`references/data-contracts.md` 和 `references/structured-data-contracts.md` 人工解析用户路线，生成 `<工作目录>/route-structure.json`；再运行脚本：
 

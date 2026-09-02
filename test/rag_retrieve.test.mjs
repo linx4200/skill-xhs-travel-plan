@@ -73,34 +73,90 @@ const index = {
   ],
 };
 
-test("place retrieval only returns chunks that match candidate_places", () => {
-  const result = retrieve(index, { place: "A地方", theme: "safety", topK: 10, maxChunks: 10 });
+test("place retrieval only returns chunks that match candidate_places", async () => {
+  const result = await retrieve(index, { place: "A地方", theme: "safety", topK: 10, maxChunks: 10, includeDiagnostics: true });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["a-place-safety"],
   );
+  const selected = result.diagnostics.chunks.find((item) => item.chunk_id === "a-place-safety");
+  assert.equal(selected.recall_status, "selected");
+  assert.equal(selected.gate.reason, "candidate_places_match");
+  assert.equal(selected.score.profile, "entity_query_keyword");
+  assert.equal(selected.score.contributions.route_entity_match, 0.35);
+
+  const filtered = result.diagnostics.chunks.find((item) => item.chunk_id === "a-text-only");
+  assert.equal(filtered.recall_status, "filtered_by_entity_gate");
+  assert.equal(filtered.gate.reason, "candidate_places_miss");
 });
 
-test("query-only retrieval can still use keyword matches without candidate entities", () => {
-  const result = retrieve(index, { query: "安全", topK: 10, maxChunks: 10 });
+test("query-only retrieval can still use keyword matches without candidate entities", async () => {
+  const result = await retrieve(index, { query: "安全", topK: 10, maxChunks: 10 });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["a-place-safety", "b-place-safety", "general-safety"],
   );
 });
 
-test("city retrieval prefers city-level chunks without candidate_places", () => {
-  const result = retrieve(index, { city: "甲城市", theme: "transport", topK: 10, maxChunks: 10 });
+test("city retrieval prefers city-level chunks without candidate_places", async () => {
+  const result = await retrieve(index, { city: "甲城市", theme: "transport", topK: 10, maxChunks: 10 });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["city-lodging", "a-text-only", "a-place-safety", "b-place-safety"],
   );
 });
 
-test("city retrieval does not fall back to title or text city matches without candidate_cities", () => {
-  const result = retrieve(index, { city: "乙城市", theme: "lodging", topK: 10, maxChunks: 10 });
+test("city retrieval does not fall back to title or text city matches without candidate_cities", async () => {
+  const result = await retrieve(index, { city: "乙城市", theme: "lodging", topK: 10, maxChunks: 10 });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["other-city-lodging"],
   );
+});
+
+test("query embedding similarity participates in ranking when chunk embeddings exist", async () => {
+  const vectorIndex = {
+    embedding: { provider: "ollama", model: "test-embed", dimensions: 3 },
+    chunks: [
+      {
+        chunk_id: "keyword-hit",
+        source_uri: "resources/keyword-hit.json",
+        resource_path: "keyword-hit.json",
+        title: "徒步提示",
+        text: "徒步路线很轻松。",
+        candidate_places: [],
+        candidate_cities: [],
+        keywords: ["徒步"],
+        embedding: [0, 1, 0],
+      },
+      {
+        chunk_id: "semantic-hit",
+        source_uri: "resources/semantic-hit.json",
+        resource_path: "semantic-hit.json",
+        title: "山路体验",
+        text: "需要预留体力。",
+        candidate_places: [],
+        candidate_cities: [],
+        keywords: [],
+        embedding: [1, 0, 0],
+      },
+    ],
+  };
+  const result = await retrieve(vectorIndex, {
+    query: "徒步",
+    topK: 10,
+    maxChunks: 10,
+    embeddingClient: async () => ({ embeddings: [[1, 0, 0]] }),
+    includeDiagnostics: true,
+  });
+
+  assert.deepEqual(
+    result.results.map((item) => item.chunk_id),
+    ["semantic-hit", "keyword-hit"],
+  );
+  assert.equal(result.results[0].matched_by.includes("embedding"), true);
+  const semanticTrace = result.diagnostics.chunks.find((item) => item.chunk_id === "semantic-hit");
+  assert.equal(semanticTrace.vector_match.used, true);
+  assert.equal(semanticTrace.vector_match.cosine_similarity, 1);
+  assert.equal(semanticTrace.score.contributions.query_embedding_similarity, 0.7);
 });
