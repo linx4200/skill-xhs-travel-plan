@@ -8,23 +8,23 @@ import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
  * 景点级检索主题。每个 theme 对应一组用于关键词召回和排序的中文触发词。
  */
 export const PLACE_THEMES = {
-  highlights: ["看点", "体验", "推荐", "拍照", "观景台", "风景", "出片"],
-  drawbacks: ["缺点", "避坑", "排队", "差评", "坑", "不推荐"],
-  tickets: ["门票", "预约", "开放", "开放时间", "优惠", "套票", "票价"],
-  transport: ["停车", "入口", "导航", "交通", "自驾", "路况", "摆渡车", "游客中心", "观光车", "包车", "打车"],
-  routes: ["路线", "游船", "徒步", "玩法", "顺序", "索道", "缆车", "观光车", "步道"],
-  safety: ["老人", "小孩", "安全", "温差", "高反", "防滑", "风大", "天气", "海拔", "补给", "厕所"],
+  highlights: ["看点", "体验", "推荐", "出片"],
+  drawbacks: ["缺点", "避坑", "差评", "坑", "不推荐"],
+  tickets: ["门票", "预约", "开放", "优惠", "套票", "票价"],
+  transport: ["停车", "入口", "导航", "交通", "自驾", "路况", "游客中心", "包车", "打车"],
+  routes: ["路线", "游船", "徒步", "玩法", "索道", "缆车", "观光车", "步行", "排队", "摆渡车"],
+  safety: ["老人", "小孩", "安全", "温差", "高反", "天气", "海拔", "补给", "厕所"],
 };
 
 /**
  * 城市级检索主题。城市主题偏向吃住行、备选点和整体风险提醒。
  */
 export const CITY_THEMES = {
-  foods: ["美食", "餐厅", "小吃", "夜市", "避坑", "豆花", "燃面", "烧烤"],
-  lodging: ["住宿", "酒店", "民宿", "区域", "县城", "住"],
+  foods: ["美食", "餐厅", "小吃", "夜市"],
+  lodging: ["住宿", "酒店", "民宿"],
   transport: ["停车", "路况", "导航", "限行", "交通", "自驾", "高铁", "大巴", "包车", "打车", "拼车"],
-  backup_places: ["备选", "景点", "古城", "街区", "观景台", "老城", "县城"],
-  notes: ["风险", "天气", "海拔", "安全", "温差", "高反", "风大", "避坑"],
+  backup_places: ["备选", "景点", "古城", "观景台"],
+  notes: ["风险", "天气", "海拔", "安全", "温差", "高反", "避坑", "贴士"],
 };
 
 /**
@@ -224,11 +224,17 @@ function titleSourceScore(chunk, aliases) {
  */
 function matchedBy(chunk, entity, aliases, terms) {
   const matches = [];
-  if (entity?.type === "place" && chunk.candidate_places.some((place) => relatedPlaceName(entity.name, place))) matches.push("candidate_places");
-  if (entity?.type === "city" && chunk.candidate_cities.includes(entity.name)) matches.push("candidate_cities");
-  if (titleSourceScore(chunk, aliases) > 0) matches.push("title_source");
-  if (keywordScore(chunk, terms) > 0) matches.push("keyword");
-  if (!matches.length && entityScore(chunk, entity, aliases) > 0) matches.push("text_entity");
+  const candidateMatched = entity?.type === "place" && chunk.candidate_places.some((place) => relatedPlaceName(entity.name, place));
+  const cityMatched = entity?.type === "city" && chunk.candidate_cities.includes(entity.name);
+  const titleSourceMatched = titleSourceScore(chunk, aliases) > 0;
+  const keywordMatched = keywordScore(chunk, terms) > 0;
+  const textEntityMatched = entityScore(chunk, entity, aliases) > 0 && !candidateMatched && !cityMatched && !titleSourceMatched;
+
+  if (candidateMatched) matches.push("candidate_places");
+  if (cityMatched) matches.push("candidate_cities");
+  if (titleSourceMatched) matches.push("title_source");
+  if (textEntityMatched) matches.push("text_entity");
+  if (keywordMatched) matches.push("keyword");
   return matches;
 }
 
@@ -265,6 +271,14 @@ function scoreChunk(chunk, entity, aliases, terms) {
 }
 
 /**
+ * 实体检索必须先确认 chunk 归属；主题词只负责在已归属材料里排序。
+ */
+function passesEntityGate(chunk, entity, aliases) {
+  if (!entity?.name) return true;
+  return entityScore(chunk, entity, aliases) > 0;
+}
+
+/**
  * 让同分结果稳定排序，避免多次运行产生不必要的 JSON diff。
  */
 function compareResults(left, right) {
@@ -295,6 +309,7 @@ export function retrieve(indexOrPath, options = {}) {
   const limit = Math.min(topK, maxChunks);
 
   const results = index.chunks
+    .filter((chunk) => passesEntityGate(chunk, entity, aliases))
     .map((chunk) => {
       const scored = scoreChunk(chunk, entity, aliases, terms);
       return resultForChunk(chunk, scored.score, scored.matches);
