@@ -198,12 +198,12 @@ function keywordScore(chunk, terms) {
 function entityScore(chunk, entity, aliases) {
   if (!entity?.name) return 0;
   if (entity.type === "place") {
-    if (chunk.candidate_places.some((place) => relatedPlaceName(entity.name, place))) return 1;
+    if (candidatePlaceMatched(chunk, entity.name)) return 1;
     const haystack = `${chunk.title}\n${chunk.source_uri}\n${chunk.resource_path}\n${chunk.text}`;
     if (aliases.some((alias) => haystack.includes(alias))) return 0.75;
     return 0;
   }
-  if (chunk.candidate_cities.includes(entity.name)) return 1;
+  if (candidateCityMatched(chunk, entity.name)) return 1;
   const haystack = `${chunk.title}\n${chunk.source_uri}\n${chunk.resource_path}\n${chunk.text}`;
   if (aliases.some((alias) => haystack.includes(alias))) return 0.75;
   return 0;
@@ -224,8 +224,8 @@ function titleSourceScore(chunk, aliases) {
  */
 function matchedBy(chunk, entity, aliases, terms) {
   const matches = [];
-  const candidateMatched = entity?.type === "place" && chunk.candidate_places.some((place) => relatedPlaceName(entity.name, place));
-  const cityMatched = entity?.type === "city" && chunk.candidate_cities.includes(entity.name);
+  const candidateMatched = entity?.type === "place" && candidatePlaceMatched(chunk, entity.name);
+  const cityMatched = entity?.type === "city" && candidateCityMatched(chunk, entity.name);
   const titleSourceMatched = titleSourceScore(chunk, aliases) > 0;
   const keywordMatched = keywordScore(chunk, terms) > 0;
   const textEntityMatched = entityScore(chunk, entity, aliases) > 0 && !candidateMatched && !cityMatched && !titleSourceMatched;
@@ -271,11 +271,35 @@ function scoreChunk(chunk, entity, aliases, terms) {
 }
 
 /**
+ * 判断 chunk 是否被上游明确标注为目标地点。
+ */
+function candidatePlaceMatched(chunk, placeName) {
+  return chunk.candidate_places.some((place) => relatedPlaceName(placeName, place));
+}
+
+/**
+ * 判断 chunk 是否被上游明确标注为目标城市。
+ */
+function candidateCityMatched(chunk, cityName) {
+  return chunk.candidate_cities.includes(cityName);
+}
+
+/**
  * 实体检索必须先确认 chunk 归属；主题词只负责在已归属材料里排序。
  */
-function passesEntityGate(chunk, entity, aliases) {
+function passesEntityGate(chunk, entity) {
   if (!entity?.name) return true;
-  return entityScore(chunk, entity, aliases) > 0;
+  if (entity.type === "place") return candidatePlaceMatched(chunk, entity.name);
+  if (entity.type === "city") return candidateCityMatched(chunk, entity.name);
+  return false;
+}
+
+/**
+ * 城市检索优先返回没有 candidate_places 的城市级 chunk。
+ */
+function cityLevelPriority(result, entity) {
+  if (entity?.type !== "city") return 0;
+  return result.matched_by.includes("candidate_cities") && result.candidate_places.length === 0 ? 1 : 0;
 }
 
 /**
@@ -288,6 +312,13 @@ function compareResults(left, right) {
     left.source_uri.localeCompare(right.source_uri, "zh-CN") ||
     left.chunk_id.localeCompare(right.chunk_id, "zh-CN")
   );
+}
+
+/**
+ * 在城市检索中先排城市级 chunk，再使用通用分数排序。
+ */
+function compareResultsForEntity(left, right, entity) {
+  return cityLevelPriority(right, entity) - cityLevelPriority(left, entity) || compareResults(left, right);
 }
 
 /**
@@ -306,16 +337,18 @@ export function retrieve(indexOrPath, options = {}) {
   const query = uniqueStrings([entity?.name, ...themeTerms(entity?.type, theme), options.query]).join(" ");
   const topK = Number(options.topK ?? 5);
   const maxChunks = Number(options.maxChunks ?? 20);
+  // 单次 theme 检索最多返回 min(topK, maxChunks) 条。
+  // 因此当 topK > maxChunks 时，超出的 K 不会增加该 theme 的候选结果。
   const limit = Math.min(topK, maxChunks);
 
   const results = index.chunks
-    .filter((chunk) => passesEntityGate(chunk, entity, aliases))
+    .filter((chunk) => passesEntityGate(chunk, entity))
     .map((chunk) => {
       const scored = scoreChunk(chunk, entity, aliases, terms);
       return resultForChunk(chunk, scored.score, scored.matches);
     })
     .filter((result) => result.score > 0)
-    .sort(compareResults)
+    .sort((left, right) => compareResultsForEntity(left, right, entity))
     .slice(0, limit);
 
   return {

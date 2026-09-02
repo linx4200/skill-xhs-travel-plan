@@ -46,7 +46,7 @@ JSON 版本重要字段：
 - `retrieval.city_themes`：城市默认检索主题。
 - `retrieval.place_top_k`、`city_top_k`：每个主题保留的结果数量。
 - `retrieval.max_place_chunks`、`max_city_chunks`：单个 target 跨主题去重后的最大阅读 chunk 数。
-- `retrieval.scoring`：检索排序策略说明，用于复现实验和调参。带 `place` / `city` 的检索会先要求 chunk 命中目标实体，再用主题关键词排序；纯关键词命中不会进入该实体命中池。
+- `retrieval.scoring`：检索排序策略说明，用于复现实验和调参。带 `place` 的检索只召回 `candidate_places` 命中目标地点的 chunk；带 `city` 的检索只召回 `candidate_cities` 命中目标城市的 chunk，并优先排序没有 `candidate_places` 的城市级 chunk。主题关键词只在候选池内排序。
 - `chunks_by_id`：本次批量检索命中的全局唯一 chunk 原文库；同一 chunk 即使命中多个 target 或 theme，`text` 也只保存一份。
 - `places.<地点名>.target`：地点 target 元信息，包括 `type`、`name`、`days` 和 `source_files_count`。
 - `places.<地点名>.unique_chunk_ids`：该地点跨主题去重后的 chunk 阅读顺序。

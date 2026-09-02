@@ -117,8 +117,8 @@ function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResul
     if (!results.length) warnings.push(`empty_theme:${theme}`);
   }
   if (targetType === "city") {
-    const candidateCityHits = selectedResults.filter((result) => result.matched_by.includes("candidate_cities")).length;
-    if (selectedResults.length && candidateCityHits < Math.ceil(selectedResults.length / 2)) {
+    const cityLevelHits = selectedResults.filter((result) => asList(result.candidate_places).length === 0).length;
+    if (selectedResults.length && cityLevelHits < Math.ceil(selectedResults.length / 2)) {
       warnings.push("city_retrieval_is_broad");
     }
   }
@@ -131,6 +131,18 @@ function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResul
 
 /**
  * 对单个景点或城市运行所有默认主题检索，并收集主题结果和去重 chunk_id。
+ *
+ * 收集顺序等于 PLACE_THEMES / CITY_THEMES 的对象 key 顺序：
+ * place 为 highlights -> drawbacks -> tickets -> transport -> routes -> safety；
+ * city 为 foods -> lodging -> transport -> backup_places -> notes。
+ *
+ * 每个 theme 会单独调用 retrieve()，先在该 theme 内排序并取 topK。
+ * 然后这里按 theme 顺序把结果加入 unique_chunk_ids，并用 selectedIdSet 跨 theme 去重。
+ * unique_chunk_ids 到 maxChunks 后，后续 theme 的新 chunk 不再进入阅读池；
+ * 但后续 theme 命中已入池的 chunk 时，仍会保留在 themes.<theme>[] 索引里。
+ *
+ * 这里不是把所有 theme 的候选合并后全局排序取 N。
+ * 当 topK > maxChunks 时，前面的 theme 可能直接占满 N 个名额，后面的 theme 很难贡献新 chunk。
  */
 function collectThemeResults(index, entityType, name, themes, topK, maxChunks) {
   const themeResults = {};
@@ -286,7 +298,7 @@ export function createRetrievalWorkspace(factsPath, ragIndexPath, options = {}) 
       max_place_chunks: maxPlaceChunks,
       max_city_chunks: maxCityChunks,
       scoring: {
-        strategy: "entity_gated_keyword_entity_title",
+        strategy: "candidate_gated_keyword_entity_title",
         weights: {
           keyword_match: 0.45,
           route_entity_match: 0.35,
