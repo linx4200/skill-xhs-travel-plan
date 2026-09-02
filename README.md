@@ -11,7 +11,15 @@ npm run create-workspace -- --route-json <工作目录>/route-structure.json --r
 npm run rag:workspace -- --facts <工作目录>/facts-workspace.json --rag-index <rag-index.json> -o <工作目录>/retrieval-workspace.json
 ```
 
-随后 agent 读取 `retrieval-workspace.json`，按地点、城市和主题填充第一版 `facts-workspace.json`。RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`。
+随后 agent 读取 `retrieval-workspace.json`，按地点、城市和主题整理 `facts-patch.json`，再合并、检查、渲染：
+
+```bash
+npm run apply-facts-patch -- --facts <工作目录>/facts-workspace.json --patch <工作目录>/facts-patch.json
+npm run render -- <工作目录>/facts-workspace.json -o <输出目录>
+npm run verify -- <输出目录>
+```
+
+RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`。
 
 没有 `rag-index.json` 时，完整 HTML 攻略优先走结构化流程，减少反复读取素材和手写 HTML。先按 `SKILL.md`、`references/info-rules.md`、`references/data-contracts.md` 和 `references/structured-data-contracts.md` 人工解析用户路线，生成 `<工作目录>/route-structure.json`；再运行脚本：
 
@@ -22,6 +30,12 @@ npm run create-workspace -- --route-json <工作目录>/route-structure.json --i
 npm run create-queue -- --index <工作目录>/resource-index.json --facts <工作目录>/facts-workspace.json -o <工作目录>/reading-queue.json
 npm run create-digest -- --queue <工作目录>/reading-queue.json -o <工作目录>/source-digest.json
 npm run create-read-log -- --index <工作目录>/resource-index.json --digest <工作目录>/source-digest.json -o <工作目录>/read-log.json
+```
+
+agent 填完 digest 并整理 `facts-patch.json` 后，再合并、检查、渲染：
+
+```bash
+npm run apply-facts-patch -- --facts <工作目录>/facts-workspace.json --patch <工作目录>/facts-patch.json
 npm run render -- <工作目录>/facts-workspace.json -o <输出目录>
 npm run verify -- <输出目录>
 ```

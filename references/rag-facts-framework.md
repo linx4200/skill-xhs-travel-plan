@@ -23,7 +23,7 @@ RAG 主流程不再生成 `resource-index.json`、`reading-queue.json` 或 `sour
 9. 评估 `facts-workspace.json` 是否足够生成 HTML
 10. 渲染 HTML 并运行校验
 
-RAG 流程中的主路径应短于非 RAG 结构化流程。第 4 步之后，如果 `retrieval-workspace.json` 的召回质量足够，且第 6 步字段级 checklist 通过，agent 可以直接从 `retrieval-workspace.json` 读取目标 chunks 并填充 `facts-workspace.json`，然后进入渲染前评估；不需要创建或维护 `resource-index.json`、`reading-queue.json` 和 `source-digest.json`。
+RAG 流程中的主路径应短于非 RAG 结构化流程。第 4 步之后，如果 `retrieval-workspace.json` 的召回质量足够，且第 6 步字段级 checklist 通过，agent 可以从 `retrieval-workspace.json` 读取目标 chunks，把判断后的结果整理成 facts patch，用 `apply_facts_patch.mjs` 合并到 `facts-workspace.json`，再进入渲染前评估；不需要创建或维护 `resource-index.json`、`reading-queue.json` 和 `source-digest.json`。
 
 旧的原文读取链路不属于当前 RAG 主流程。若未来需要支持“RAG 失败后回读原材料”，应作为显式可选分支另行设计，而不是默认混入 RAG happy path。
 
@@ -124,7 +124,7 @@ unresolved high-risk fields or conflicts
 
 阶段 1 继续按 `structured-generation-workflow.md` 和 `info-rules.md` 的既有规则，由 agent 解析用户路线并创建 `route-structure.json`。路线解析边界、真实游玩地点、短停点、城市和住宿/中转点的判断继续沿用现有逻辑。
 
-阶段 2 不再使用 `scan_resources.mjs` 创建 `resource-index.json`。RAG index 已经包含 chunk text、候选地点、候选城市、关键词和来源 URI；重复扫描原始素材会增加一个低价值中间文件，并重新引入原材料回读心智负担。
+阶段 2 不再使用 `scan_resources.mjs` 创建 `resource-index.json`。RAG index 已经包含 chunk text、候选地点、候选城市、关键词和来源 URI；重复扫描原始素材会增加一个低价值中间文件，并重新引入原材料回读心智负担。不要直接打印或预览完整 RAG index；脚本解析失败时停止流程并报告错误。
 
 阶段 2 需要确认：
 
@@ -366,7 +366,7 @@ unresolved high-risk fields or conflicts
 
 第四步可以做 retrieval health 初筛，例如标记召回太少、城市检索过泛、某主题为空或结果缺少实体命中。但这些只是软提醒或硬缺口线索。真正是否二次定向检索、保留冲突或标注“材料未说明”，必须由第六步字段级 checklist 判断。
 
-在 RAG happy path 中，第四步之后不再默认创建 `resource-index.json`、`reading-queue.json` 或 `source-digest.json`。agent 直接按 `unique_chunk_ids` 读取 `chunks_by_id` 中的 note 原文，并把判断后的事实写入 `facts-workspace.json`。只有第六步发现字段缺口、冲突或高风险不确定项时，才补检索或写入缺口/确认事项。
+在 RAG happy path 中，第四步之后不再默认创建 `resource-index.json`、`reading-queue.json` 或 `source-digest.json`。agent 直接按 `unique_chunk_ids` 读取 `chunks_by_id` 中的 note 原文，并把判断后的事实整理成 facts patch，再合并到 `facts-workspace.json`。只有第六步发现字段缺口、冲突或高风险不确定项时，才补检索或写入缺口/确认事项。
 
 ### Retrieval workspace 建议结构
 
@@ -683,14 +683,14 @@ unresolved high-risk fields or conflicts
 
 ### 阶段 5 设计结论
 
-第五步的产物不是新文件，而是填充后的 `facts-workspace.json`。它定位为“RAG 阅读结果到可渲染 facts 的人工判断层”：agent 读取第四步生成的 `retrieval-workspace.json`，按地点、城市和主题理解 note chunks，再把经过归属确认、去重、冲突处理和压缩改写后的事实写入 `facts-workspace.json`。
+第五步的核心产物是填充后的 `facts-workspace.json`，但推荐先生成局部 `facts-patch.json`，再通过 `apply_facts_patch.mjs` 合并。它定位为“RAG 阅读结果到可渲染 facts 的人工判断层”：agent 读取第四步生成的 `retrieval-workspace.json`，按地点、城市和主题理解 note chunks，再把经过归属确认、去重、冲突处理和压缩改写后的事实写入 facts patch。
 
 第五步必须完成：
 
 - 先做引用完整性检查：确认 `facts-workspace.json` 中的地点和城市都有对应 retrieval target，且 retrieval target 引用的所有 `chunk_id` 都能在顶层 `chunks_by_id` 中找到。
 - 按每日路线顺序处理 `places`，而不是按 JSON key 顺序处理。这样每日摘要、timeline、当天提醒和确认事项能跟路线执行顺序保持一致。
 - 每个地点先按 `unique_chunk_ids` 去重阅读 chunk 原文，再用 `themes` 辅助定位字段。`themes` 只作为阅读索引，不作为事实归属的最终判断。
-- 将有效事实写入 `places.<地点名>` 的 summary、highlights、drawbacks、opening_hours、tickets、duration、routes、play_options、practical_info、notes 和 conflicts 等字段。
+- 将有效事实写入 facts patch 中的 `places.<地点名>` 的 summary、highlights、drawbacks、opening_hours、tickets、duration、routes、play_options、practical_info、notes 和 conflicts 等字段。
 - 在所有地点处理完成后，再处理 `cities`。城市页 `include` 判断必须先排除已经写进每日路线、地点详情、全局提醒或出发前确认的内容。
 - 最后整理 `trip.days[].summary`、`trip.days[].timeline`、`trip.days[].notes`、`trip.days[].confirmations`、`global_notes` 和 `confirm_before_departure`。
 - 对冲突、低置信或高风险待确认的信息，在对应的 `conflicts`、`notes`、`confirmations` 或 `confirm_before_departure` 中保留 `source_uri` 或 title 线索。
@@ -698,7 +698,7 @@ unresolved high-risk fields or conflicts
 第五步不应完成：
 
 - 不从 RAG 结果新增 `route_places`。
-- 不把 chunk 原文、score、`matched_by` 或大段 evidence 写入 `facts-workspace.json`。
+- 不把 chunk 原文、score、`matched_by` 或大段 evidence 写入 facts patch 或 `facts-workspace.json`。
 - 不把 `themes` 命中结果机械搬运成 facts 字段；同一 chunk 可以服务多个字段，但最终 facts 必须是 agent 判断后的执行信息。
 - 不默认创建或维护 `source-digest.json`。在 RAG happy path 中，`retrieval-workspace.json` 已经承担批量阅读包职责；再新增一层 digest 会让流程变重。
 - 不判断 `facts-workspace.json` 是否已经足够渲染 HTML。字段级完整性评估留给第六步。
@@ -712,6 +712,7 @@ unresolved high-risk fields or conflicts
   -> 基于已写地点内容填 trip.days
   -> 排除重复后判断并填 cities
   -> 汇总 global_notes 和 confirm_before_departure
+  -> apply_facts_patch.mjs 合并 facts patch
   -> 保持 needs_agent_review: true，交给第六步 checklist
 ```
 

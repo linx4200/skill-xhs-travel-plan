@@ -36,11 +36,13 @@ RAG 介入 facts 生成的总体设计见 [rag-facts-framework.md](rag-facts-fra
 
 ## Step 2：校验 RAG Index
 
-读取并校验 `rag-index.json`：
+用脚本读取并校验 `rag-index.json`，不要直接打印或预览完整索引：
 
 - 顶层应能解析为 JSON 或 JSONL。
 - chunk 应包含可用于检索的 `chunk_id`、`source_uri`、`title`、`text`、`candidate_places`、`candidate_cities` 和 `keywords`。
 - 如果需要渲染本地照片，`resource_root` 应指向可读资源目录，且照片应位于 `photos/` 下。
+
+如果 `rag-index.json` 与用户描述不符，让后续工作区脚本自然失败并停止流程，向用户报告脚本错误即可。命令输出只保留统计、错误和少量标题级摘要；不要把 `chunks[].text` 或 `embedding` 打印到对话上下文。
 
 RAG 主流程不生成 `resource-index.json`。`facts-workspace.json` 的地点/城市来源线索来自 RAG chunks 的 `source_uri`，照片归属由 `create_fact_workspace.mjs --rag-index` 直接扫描 `resource_root/photos` 得到。
 
@@ -81,10 +83,11 @@ Agent 读取 `retrieval-workspace.json` 后填充 `facts-workspace.json`：
 
 1. 先做引用完整性检查：确认 facts 中的地点和城市都有对应 retrieval target，且 `unique_chunk_ids` / `themes.*[].chunk_id` 都能在 `chunks_by_id` 中找到。
 2. 按每日 `route_places` 顺序处理 `places`，先读 `unique_chunk_ids`，再用 `themes` 辅助定位字段。
-3. 将有效事实写入 `places.<地点名>`，只写判断后的执行信息，不复制 chunk 原文。
+3. 将有效事实整理成局部 facts patch，只写判断后的执行信息，不复制 chunk 原文。
 4. 基于已写地点内容整理 `trip.days[].summary`、`timeline`、`notes` 和 `confirmations`。
 5. 所有地点处理完成后再处理 `cities`。城市页 `include` 判断必须先排除已经写进地点页、每日页、全局提醒或确认清单的内容。
 6. 最后整理 `global_notes` 和 `confirm_before_departure`。
+7. 用 `node scripts/apply_facts_patch.mjs --facts <工作目录>/facts-workspace.json --patch <工作目录>/facts-patch.json` 合并 patch。
 
 第五步结束时只得到第一版 facts；`needs_agent_review` 仍保持 `true`。后续是否补检索、记录缺口、联网白名单查询或渲染 HTML，由第六步及之后流程决定。
 
