@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CITY_THEMES, PLACE_THEMES, loadRagIndex, retrieve } from "./rag_retrieve.mjs";
+import { CITY_THEMES, PLACE_THEMES, loadRagIndex, retrieve, writeRetrievalLog } from "./rag_retrieve.mjs";
 
 /**
  * 解析批量检索命令参数，读取 facts workspace、RAG index 和输出路径。
@@ -16,6 +16,10 @@ function parseArgs(argv) {
     cityTopK: 4,
     maxPlaceChunks: 20,
     maxCityChunks: 16,
+    embeddingUrl: "",
+    embeddingModel: "",
+    noEmbedding: false,
+    log: "",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -27,6 +31,10 @@ function parseArgs(argv) {
     else if (arg === "--city-top-k") args.cityTopK = Number(argv[++i]);
     else if (arg === "--max-place-chunks") args.maxPlaceChunks = Number(argv[++i]);
     else if (arg === "--max-city-chunks") args.maxCityChunks = Number(argv[++i]);
+    else if (arg === "--embedding-url") args.embeddingUrl = argv[++i];
+    else if (arg === "--embedding-model") args.embeddingModel = argv[++i];
+    else if (arg === "--no-embedding") args.noEmbedding = true;
+    else if (arg === "--log") args.log = argv[++i];
     else throw new Error(`Unexpected argument: ${arg}`);
   }
 
@@ -144,19 +152,31 @@ function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResul
  * 这里不是把所有 theme 的候选合并后全局排序取 N。
  * 当 topK > maxChunks 时，前面的 theme 可能直接占满 N 个名额，后面的 theme 很难贡献新 chunk。
  */
-function collectThemeResults(index, entityType, name, themes, topK, maxChunks) {
+async function collectThemeResults(index, entityType, name, themes, topK, maxChunks, options = {}) {
   const themeResults = {};
   const selectedIds = [];
   const selectedIdSet = new Set();
   const selectedById = new Map();
 
   for (const theme of Object.keys(themes)) {
-    const result = retrieve(index, {
+    const result = await retrieve(index, {
       [entityType]: name,
       theme,
       topK,
       maxChunks,
+      embeddingUrl: options.embeddingUrl,
+      embeddingModel: options.embeddingModel,
+      noEmbedding: options.noEmbedding,
+      includeDiagnostics: Boolean(options.logRequests),
     });
+    if (options.logRequests && result.diagnostics) {
+      options.logRequests.push({
+        target_type: entityType,
+        target_name: name,
+        theme,
+        ...result.diagnostics,
+      });
+    }
     const kept = [];
     for (const item of result.results.slice(0, topK)) {
       if (!selectedIdSet.has(item.chunk_id)) {
@@ -224,26 +244,50 @@ function themeIndexes(themeResults) {
 }
 
 /**
+ * 批量日志和 retrieval workspace 共用 source/scoring 元信息，方便对照调试。
+ */
+function retrievalLogDocument(workspace, requests) {
+  const selectedCount = requests.reduce(
+    (total, request) => total + request.chunks.filter((chunk) => chunk.recall_status === "selected").length,
+    0,
+  );
+  return {
+    schema_version: 1,
+    source: workspace.source,
+    retrieval: workspace.retrieval,
+    summary: {
+      request_count: requests.length,
+      index_chunk_evaluations: requests.reduce((total, request) => total + request.chunks.length, 0),
+      selected_results: selectedCount,
+    },
+    requests,
+  };
+}
+
+/**
  * 批量生成 retrieval-workspace.json，供 agent 在填 facts 前优先阅读。
  */
-export function createRetrievalWorkspace(factsPath, ragIndexPath, options = {}) {
+export async function createRetrievalWorkspace(factsPath, ragIndexPath, options = {}) {
   const facts = readJson(factsPath);
   const index = loadRagIndex(ragIndexPath);
   const placeTopK = Number(options.placeTopK ?? 5);
   const cityTopK = Number(options.cityTopK ?? 4);
   const maxPlaceChunks = Number(options.maxPlaceChunks ?? 20);
   const maxCityChunks = Number(options.maxCityChunks ?? 16);
+  const hasChunkEmbeddings = asList(index.chunks).some((chunk) => asList(chunk.embedding).length > 0);
+  const usesEmbedding = hasChunkEmbeddings && !options.noEmbedding;
 
   const chunksById = {};
   const places = {};
   for (const place of Object.keys(facts.places ?? {})) {
-    const { themeResults, unique_chunk_ids, selected_results } = collectThemeResults(
+    const { themeResults, unique_chunk_ids, selected_results } = await collectThemeResults(
       index,
       "place",
       place,
       PLACE_THEMES,
       placeTopK,
       maxPlaceChunks,
+      options,
     );
     for (const result of selected_results) chunksById[result.chunk_id] ??= chunkRecord(result);
     places[place] = {
@@ -256,13 +300,14 @@ export function createRetrievalWorkspace(factsPath, ragIndexPath, options = {}) 
 
   const cities = {};
   for (const city of Object.keys(facts.cities ?? {})) {
-    const { themeResults, unique_chunk_ids, selected_results } = collectThemeResults(
+    const { themeResults, unique_chunk_ids, selected_results } = await collectThemeResults(
       index,
       "city",
       city,
       CITY_THEMES,
       cityTopK,
       maxCityChunks,
+      options,
     );
     for (const result of selected_results) chunksById[result.chunk_id] ??= chunkRecord(result);
     cities[city] = {
@@ -298,12 +343,32 @@ export function createRetrievalWorkspace(factsPath, ragIndexPath, options = {}) 
       max_place_chunks: maxPlaceChunks,
       max_city_chunks: maxCityChunks,
       scoring: {
-        strategy: "candidate_gated_keyword_entity_title",
-        weights: {
-          keyword_match: 0.45,
-          route_entity_match: 0.35,
-          title_source_match: 0.2,
-        },
+        strategy: usesEmbedding ? "candidate_gated_embedding_keyword_entity_title" : "candidate_gated_keyword_entity_title",
+        weights: usesEmbedding
+          ? {
+              entity_query: {
+                query_embedding_similarity: 0.45,
+                keyword_match: 0.25,
+                route_entity_match: 0.2,
+                title_source_match: 0.1,
+              },
+              query_only: {
+                query_embedding_similarity: 0.7,
+                keyword_match: 0.2,
+                title_source_match: 0.1,
+              },
+            }
+          : {
+              entity_query: {
+                keyword_match: 0.45,
+                route_entity_match: 0.35,
+                title_source_match: 0.2,
+              },
+              query_only: {
+                keyword_match: 0.8,
+                title_source_match: 0.2,
+              },
+            },
       },
     },
     chunks_by_id: chunksById,
@@ -331,23 +396,28 @@ export function createRetrievalWorkspace(factsPath, ragIndexPath, options = {}) 
 /**
  * CLI 入口：生成文件并输出简短统计。
  */
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const workspace = createRetrievalWorkspace(args.facts, args.ragIndex, args);
+  const logRequests = [];
+  const options = {
+    ...args,
+    logRequests: args.log ? logRequests : null,
+  };
+  const workspace = await createRetrievalWorkspace(args.facts, args.ragIndex, options);
   workspace.source.facts_workspace = relativeToOut(args.facts, args.out);
   workspace.source.rag_index = relativeToOut(args.ragIndex, args.out);
+  if (args.log) workspace.source.retrieval_log = relativeToOut(args.log, args.out);
   fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
   fs.writeFileSync(args.out, `${JSON.stringify(workspace, null, 2)}\n`, "utf8");
+  if (args.log) writeRetrievalLog(args.log, retrievalLogDocument(workspace, logRequests));
   console.log(
-    `Created ${args.out} with ${workspace.summary.place_count} places, ${workspace.summary.city_count} cities, ${workspace.summary.gap_places.length} place hard gaps, and ${workspace.summary.gap_cities.length} city hard gaps.`,
+    `Created ${args.out} with ${workspace.summary.place_count} places, ${workspace.summary.city_count} cities, ${workspace.summary.gap_places.length} place hard gaps, and ${workspace.summary.gap_cities.length} city hard gaps${args.log ? `; wrote retrieval log to ${args.log}` : ""}.`,
   );
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error) => {
     console.error(error.message);
     process.exit(1);
-  }
+  });
 }

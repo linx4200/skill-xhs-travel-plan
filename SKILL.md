@@ -17,17 +17,19 @@ metadata:
 
 当用户提供的核心材料是 `rag-index.json`，或 JSON 顶层包含 `chunks`、`source_chunks`、`resource_root`、`embedding` 等 RAG 索引字段时，直接走 RAG 流程，不走原来的 `reading-queue.json` / `source-digest.json` 结构化读取流程。
 
+RAG 检索使用真实 embedding API。运行 `create_retrieval_workspace.mjs` 或 `rag_retrieve.mjs` 前，如果 `rag-index.json` 的 chunks 含有 `embedding` 向量，先确认 embedding 配置：优先使用当前 shell 环境中的 `RAG_EMBEDDING_URL`、`RAG_EMBEDDING_MODEL`；`RAG_EMBEDDING_URL` 未设置时脚本默认使用 `http://localhost:11434/api/embed`；`RAG_EMBEDDING_MODEL` 未设置时脚本会回退到 `rag-index.json` 的 `embedding.model`。如果环境变量和索引里都没有 model，先询问用户模型名，或在用户同意时使用 `--no-embedding` 临时关闭向量排序。不要把 API key 写入 skill、reference 或项目文件；需要 key 时只通过环境变量传入。
+
 RAG 流程先跑到第一版 `facts-workspace.json`：
 
 1. 读取用户路线，按 [references/info-rules.md](references/info-rules.md)、[references/data-contracts.md](references/data-contracts.md) 和 [references/rag-data-contracts.md](references/rag-data-contracts.md) 人工创建 `route-structure.json`。
 2. 用脚本校验 `rag-index.json` 可解析和必要字段完整；不要为了“看一眼”而直接打印或预览完整索引。后续脚本失败时停止当前流程，并把失败原因告诉用户。如果后续需要本地照片，使用 `rag-index.resource_root/photos`；若 `resource_root` 不存在或不可读，只影响照片归属，不进入原材料回读流程。
 3. 运行 `create_fact_workspace.mjs --rag-index` 创建带 schema 和路线骨架的 skeleton `facts-workspace.json`。
-4. 运行 `create_retrieval_workspace.mjs`，基于 `facts-workspace.json` 和 `rag-index.json` 批量创建 `retrieval-workspace.json`。
+4. 运行 `create_retrieval_workspace.mjs`，基于 `facts-workspace.json` 和 `rag-index.json` 批量创建 `retrieval-workspace.json`。需要检查召回原因时追加 `--log <工作目录>/retrieval-log.json`；该日志记录每个 target/theme 下所有 chunk 的 entity gate、召回状态、向量余弦相似度、分项得分权重和贡献。
 5. Agent 读取 `retrieval-workspace.json`，按景点、城市和主题整理 facts patch，再用 `apply_facts_patch.mjs` 合并到第一版 `facts-workspace.json`；此时 `needs_agent_review` 仍保持 `true`，等待后续字段级 checklist、补检索、缺口处理或渲染前评估。
 
 RAG 分支的第 1 步复用结构化流程的路线解析规则；不生成 `resource-index.json`。第 3 步复用事实工作区骨架脚本，但输入改为 `rag-index.json`；第 4、5 步按 [references/rag-facts-framework.md](references/rag-facts-framework.md) 和 [references/rag-workflow.md](references/rag-workflow.md) 执行。
 
-RAG happy path 中不要创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`。若用户明确不做原材料回读，则后续缺口只通过 facts checklist、定向 RAG 或“材料未说明 / 出行前确认”处理。
+RAG happy path 中不要创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`；检索调试只按需写入 `retrieval-log.json`。若用户明确不做原材料回读，则后续缺口只通过 facts checklist、定向 RAG 或“材料未说明 / 出行前确认”处理。
 
 ### 分支 B：结构化流程
 

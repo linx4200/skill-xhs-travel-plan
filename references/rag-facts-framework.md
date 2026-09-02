@@ -385,7 +385,10 @@ unresolved high-risk fields or conflicts
     "facts_workspace": "facts-workspace.json",
 
     // 本次检索使用的 RAG index。
-    "rag_index": "rag-index.json"
+    "rag_index": "rag-index.json",
+
+    // 可选：传入 --log 时记录 retrieval-log.json 路径。
+    "retrieval_log": "retrieval-log.json"
   },
 
   "retrieval": {
@@ -423,14 +426,22 @@ unresolved high-risk fields or conflicts
 
     // 可选：记录检索排序策略，方便后续复现实验。
     "scoring": {
-      // 当前 MVP 使用 candidate 归属门控 + 确定性关键词/实体/标题来源排序，不在检索时调用 embedding API。
-      "strategy": "candidate_gated_keyword_entity_title",
+      // 当前实现使用 candidate 归属门控 + query embedding 相似度 + 关键词/实体/标题来源排序。
+      "strategy": "candidate_gated_embedding_keyword_entity_title",
 
       // 当前推荐权重。实际以 rag_retrieve.mjs 实现为准。
       "weights": {
-        "keyword_match": 0.45,
-        "route_entity_match": 0.35,
-        "title_source_match": 0.2
+        "entity_query": {
+          "query_embedding_similarity": 0.45,
+          "keyword_match": 0.25,
+          "route_entity_match": 0.2,
+          "title_source_match": 0.1
+        },
+        "query_only": {
+          "query_embedding_similarity": 0.7,
+          "keyword_match": 0.2,
+          "title_source_match": 0.1
+        }
       }
     }
   },
@@ -774,6 +785,7 @@ unresolved high-risk fields or conflicts
 - 缓解城市名泛匹配导致的素材范围过宽问题，优先保留真正服务城市级吃住行、风险和备选点判断的 chunks。
 - 对长评论文件、多地点混合文件或后续更细 chunk 粒度的素材，只让 agent 阅读相关 chunk，而不是整份原文。
 - 通过 `themes` 索引把 chunks 映射到 `highlights`、`tickets`、`transport` 等字段，减少 agent 读完原文后再自行分类的成本。
+- 需要调试召回质量时，通过 `retrieval-log.json` 查看每个 chunk 的 entity gate、向量余弦相似度、召回状态和 score 分项贡献。
 - 在后续局部修改中，直接从目标地点/城市和目标 theme 定位到少量 chunks，减少重新阅读全局读取队列的需要。
 
 RAG 不应被表述为默认比 `reading-queue.json` 更省。若 chunk 粒度仍是一篇 note，且 `retrieval-workspace.json` 实际包含了大量 note 原文，初次完整生成的 token 节省可能有限。收益成立的前提是：先批量生成受 topK 和去重约束的 `retrieval-workspace.json`，agent 按 target 的 `unique_chunk_ids` 局部读取顶层 `chunks_by_id`，再按 checklist 做少量缺口补检索，而不是把全部 retrieval workspace 原文一次性读入上下文。
