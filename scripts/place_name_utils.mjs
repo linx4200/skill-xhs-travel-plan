@@ -5,7 +5,7 @@
  */
 const PLACE_NAME_RULES = {
   stripSuffixes: ["风景名胜区", "风景区", "旅游区", "国家公园", "景区", "古镇", "县城", "老城", "城区", "市区", "镇", "乡", "村"],
-  stripTailWords: ["县", "市"],
+  stripTailWords: ["县", "市", "省", "镇"],
 };
 
 /**
@@ -59,19 +59,22 @@ export function placeAliases(name, customAliases = {}) {
 
   const aliases = new Set([source]);
   const queue = [source];
+  const addAlias = (alias) => {
+    if (!alias || aliases.has(alias)) return;
+    aliases.add(alias);
+    queue.push(alias);
+  };
 
   while (queue.length) {
     const current = queue.pop();
     const directAlias = applyCustomAliases(current, customAliases);
     if (directAlias && directAlias !== current) {
-      aliases.add(directAlias);
-      queue.push(directAlias);
+      addAlias(directAlias);
     }
 
     const normalized = canonicalPlaceName(current, customAliases);
     if (normalized && normalized !== current) {
-      aliases.add(normalized);
-      queue.push(normalized);
+      addAlias(normalized);
     }
 
     let stripped = current;
@@ -88,8 +91,7 @@ export function placeAliases(name, customAliases = {}) {
       }
     }
     if (stripped && stripped !== current) {
-      aliases.add(stripped);
-      queue.push(stripped);
+      addAlias(stripped);
     }
   }
 
