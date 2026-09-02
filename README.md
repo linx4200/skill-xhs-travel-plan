@@ -3,7 +3,17 @@
 
 ## 快速生成流程
 
-完整 HTML 攻略优先走结构化流程，减少反复读取素材和手写 HTML。先按 `SKILL.md`、`references/info-rules.md` 和 `references/data-contracts.md` 人工解析用户路线，生成 `<工作目录>/route-structure.json`；再运行脚本：
+如果用户提供 `rag-index.json`，优先走 RAG 流程；契约见 `references/data-contracts.md` 和 `references/rag-data-contracts.md`。先生成第一版 `facts-workspace.json`：
+
+```bash
+npm install
+npm run create-workspace -- --route-json <工作目录>/route-structure.json --rag-index <rag-index.json> -o <工作目录>/facts-workspace.json
+npm run rag:workspace -- --facts <工作目录>/facts-workspace.json --rag-index <rag-index.json> -o <工作目录>/retrieval-workspace.json
+```
+
+随后 agent 读取 `retrieval-workspace.json`，按地点、城市和主题填充第一版 `facts-workspace.json`。RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`。
+
+没有 `rag-index.json` 时，完整 HTML 攻略优先走结构化流程，减少反复读取素材和手写 HTML。先按 `SKILL.md`、`references/info-rules.md`、`references/data-contracts.md` 和 `references/structured-data-contracts.md` 人工解析用户路线，生成 `<工作目录>/route-structure.json`；再运行脚本：
 
 ```bash
 npm install
@@ -16,4 +26,4 @@ npm run render -- <工作目录>/facts-workspace.json -o <输出目录>
 npm run verify -- <输出目录>
 ```
 
-`scan_resources.mjs` 默认从 `route-structure.json` 读取 `days[].route_places` 和 `cities`；只有需要临时补充路线 JSON 之外的匹配词时，才追加 `--place` 或 `--city`，且两者不要混用。`scan_resources.mjs` 只做素材索引和候选匹配，`create_fact_workspace.mjs` 只生成事实工作区，`create_reading_queue.mjs` 只生成按唯一文件去重的读取队列，并会过滤明显路线外的城市来源；`create_source_digest_workspace.mjs` 只生成文件级摘要工作区；它们都不会自动补充攻略事实。后续应按 `source-digest.json`、`references/structured-generation-workflow.md`、`references/info-rules.md` 和 `references/data-contracts.md` 读取相关原文，填好文件级 digest 和 `facts-workspace.json` 后再渲染。digest 填完后可用 `create-read-log` 生成评估用读取日志。
+`scan_resources.mjs` 默认从 `route-structure.json` 读取 `days[].route_places` 和 `cities`；只有需要临时补充路线 JSON 之外的匹配词时，才追加 `--place` 或 `--city`，且两者不要混用。`scan_resources.mjs` 只做素材索引和候选匹配，`create_fact_workspace.mjs` 只生成事实工作区，`create_reading_queue.mjs` 只生成按唯一文件去重的读取队列，并会过滤明显路线外的城市来源；`create_source_digest_workspace.mjs` 只生成文件级摘要工作区；它们都不会自动补充攻略事实。后续应按 `source-digest.json`、`references/structured-generation-workflow.md`、`references/info-rules.md`、`references/data-contracts.md` 和 `references/structured-data-contracts.md` 读取相关原文，填好文件级 digest 和 `facts-workspace.json` 后再渲染。digest 填完后可用 `create-read-log` 生成评估用读取日志。

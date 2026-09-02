@@ -1,8 +1,10 @@
 # 结构化低上下文生成流程
 
-当满足以下任一条件时，优先使用本流程：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、需要生成完整静态 HTML 攻略，或用户要求后续可重复修改。
+当用户没有提供 `rag-index.json`，且满足以下任一条件时，优先使用本流程：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、需要生成完整静态 HTML 攻略，或用户要求后续可重复修改。
 
-目标是让 agent 只在事实判断阶段读取少量相关原文，避免在最终 HTML 编写时反复加载素材全文。JSON 字段契约见 [data-contracts.md](data-contracts.md)，事实取舍和字段填充规则见 [info-rules.md](info-rules.md)。
+如果用户提供了 `rag-index.json`，优先按 [rag-workflow.md](rag-workflow.md) 走 RAG 分支。RAG 分支只复用本文件的阶段 1 路线解析，不生成 `resource-index.json`，也不进入 `reading-queue.json` / `source-digest.json` 主路径。
+
+目标是让 agent 只在事实判断阶段读取少量相关原文，避免在最终 HTML 编写时反复加载素材全文。共同 JSON 字段契约见 [data-contracts.md](data-contracts.md)，结构化分支专属契约见 [structured-data-contracts.md](structured-data-contracts.md)，事实取舍和字段填充规则见 [info-rules.md](info-rules.md)。
 
 注意：本流程中的脚本不是语义事实抽取器。`scan_resources.mjs` 只做素材索引、短摘录、照片目录识别和候选关键词匹配；`create_fact_workspace.mjs` 只创建结构化工作区。景点事实、冲突判断、城市页取舍和正文表达仍必须由 agent 阅读相关原文后完成。
 

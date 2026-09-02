@@ -11,6 +11,8 @@
     "create-read-log": "node scripts/create_read_log.mjs",
     "validate-digest": "node scripts/validate_source_digest.mjs",
     "apply-digest": "node scripts/apply_source_digest_to_facts.mjs",
+    "rag:retrieve": "node scripts/rag_retrieve.mjs",
+    "rag:workspace": "node scripts/create_retrieval_workspace.mjs",
     "render": "node scripts/render_travel_html.mjs",
     "verify": "node scripts/verify_output.mjs"
   },
