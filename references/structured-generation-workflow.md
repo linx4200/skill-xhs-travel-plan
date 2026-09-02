@@ -62,6 +62,8 @@ node scripts/create_source_digest_workspace.mjs \
 
 渲染 HTML 前必须读取 [pre-render-online-research.md](pre-render-online-research.md)，独立判断本次攻略是否触发被允许的联网查询项。除用户另行明确授权外，只能查询该 reference 白名单中列出的信息。对每个被允许查询的信息项，先检查 `facts-workspace.json` 是否已有明确且无冲突的可用事实；已有充分事实时直接复用，不再联网重复查询；只有 facts 缺失、覆盖不完整、存在冲突，或 reference 对该信息项明确要求核验时，才查询必要目标，并把查询结果、来源 URL 和查询日期写回 `facts-workspace.json` 的对应字段。
 
+填充或修改 facts 时，优先把语义判断结果写成局部 `facts-patch.json`，再用 `apply_facts_patch.mjs` 合并回 `facts-workspace.json`。
+
 ## 阶段 4：渲染 HTML
 
 填好 `facts-workspace.json` 后运行：

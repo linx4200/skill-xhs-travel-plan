@@ -9,6 +9,7 @@
     "create-queue": "node scripts/create_reading_queue.mjs",
     "create-digest": "node scripts/create_source_digest_workspace.mjs",
     "create-read-log": "node scripts/create_read_log.mjs",
+    "apply-facts-patch": "node scripts/apply_facts_patch.mjs",
     "validate-digest": "node scripts/validate_source_digest.mjs",
     "apply-digest": "node scripts/apply_source_digest_to_facts.mjs",
     "rag:retrieve": "node scripts/rag_retrieve.mjs",

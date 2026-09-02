@@ -20,10 +20,10 @@ metadata:
 RAG 流程先跑到第一版 `facts-workspace.json`：
 
 1. 读取用户路线，按 [references/info-rules.md](references/info-rules.md)、[references/data-contracts.md](references/data-contracts.md) 和 [references/rag-data-contracts.md](references/rag-data-contracts.md) 人工创建 `route-structure.json`。
-2. 读取并校验 `rag-index.json`。如果后续需要本地照片，使用 `rag-index.resource_root/photos`；若 `resource_root` 不存在或不可读，只影响照片归属，不进入原材料回读流程。
+2. 用脚本校验 `rag-index.json` 可解析和必要字段完整；不要为了“看一眼”而直接打印或预览完整索引。后续脚本失败时停止当前流程，并把失败原因告诉用户。如果后续需要本地照片，使用 `rag-index.resource_root/photos`；若 `resource_root` 不存在或不可读，只影响照片归属，不进入原材料回读流程。
 3. 运行 `create_fact_workspace.mjs --rag-index` 创建带 schema 和路线骨架的 skeleton `facts-workspace.json`。
 4. 运行 `create_retrieval_workspace.mjs`，基于 `facts-workspace.json` 和 `rag-index.json` 批量创建 `retrieval-workspace.json`。
-5. Agent 读取 `retrieval-workspace.json`，按景点、城市和主题填充第一版 `facts-workspace.json`；此时 `needs_agent_review` 仍保持 `true`，等待后续字段级 checklist、补检索、缺口处理或渲染前评估。
+5. Agent 读取 `retrieval-workspace.json`，按景点、城市和主题整理 facts patch，再用 `apply_facts_patch.mjs` 合并到第一版 `facts-workspace.json`；此时 `needs_agent_review` 仍保持 `true`，等待后续字段级 checklist、补检索、缺口处理或渲染前评估。
 
 RAG 分支的第 1 步复用结构化流程的路线解析规则；不生成 `resource-index.json`。第 3 步复用事实工作区骨架脚本，但输入改为 `rag-index.json`；第 4、5 步按 [references/rag-facts-framework.md](references/rag-facts-framework.md) 和 [references/rag-workflow.md](references/rag-workflow.md) 执行。
 
@@ -75,7 +75,7 @@ RAG 流程中，默认先按 `retrieval-workspace.json` 的 target 和 `unique_c
 
 结构化流程中，默认先按 `source-digest.json.files[]` 的唯一文件顺序读取原文；如果 digest 尚未生成，才按 `reading-queue.json.files[]` 读取。不要按地点或城市逐项重复打开同一素材。文件读完后先把可用事实、冲突和全局提醒沉淀到 `source-digest.json`，再分发到 `facts-workspace.json`；如果没有生成 queue 或 digest，也必须先手工去重 `source_files` 再读原文。
 
-后续修改内容时，RAG 分支优先复用 `retrieval-workspace.json` 的 target、`unique_chunk_ids` 和 `themes` 定位相关 chunks；结构化分支优先复用 `source-digest.json` 判断是否需要回读原文。修改事实后先改 `facts-workspace.json`，再重新渲染；只有 HTML 结构规则变化时才改渲染脚本。命令输出应保持简短，只显示统计、异常和必要样例，避免把大段素材打印到对话里。
+后续修改内容时，RAG 分支优先复用 `retrieval-workspace.json` 的 target、`unique_chunk_ids` 和 `themes` 定位相关 chunks；结构化分支优先复用 `source-digest.json` 判断是否需要回读原文。修改事实时优先写局部 facts patch，并用 `apply_facts_patch.mjs` 合并回 `facts-workspace.json`，再重新渲染；只有 HTML 结构规则变化时才改渲染脚本。命令输出应保持简短，只显示统计、异常和必要样例，避免把大段素材打印到对话里。
 
 优先输出可执行的旅行建议，删除套话、空话、重复信息和低价值占位内容。攻略应像给人看的执行清单，不要写成资料审计报告。
 
