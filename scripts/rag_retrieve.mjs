@@ -1,4 +1,24 @@
 #!/usr/bin/env node
+/**
+ * RAG 单点检索脚本主流程：
+ * 1. 解析 CLI 参数，确定索引路径、检索对象（景点/城市/自由 query）、主题、返回数量、embedding 和日志配置。
+ * 2. 加载并规范化 RAG 索引，兼容新版 `rag-index.json` 和旧版 JSONL chunks。
+ * 3. 构造本次检索的文本信号：
+ *    3.1 根据景点/城市名称生成实体别名，用于匹配标题、来源路径和正文中的不同写法。
+ *    3.2 根据实体类型和 theme 找到对应主题词；未知 theme 会直接作为关键词使用。
+ *    3.3 拆分自由 query，提取可参与关键词命中的查询词。
+ *    3.4 合并主题词、自由查询词和实体别名，形成用于 keyword score 的关键词集合。
+ *    3.5 合并实体名、主题词和自由 query，拼出用于 embedding API 的检索 query。
+ * 4. 在可用时调用 embedding API 生成 query 向量；否则退回到纯关键词、实体和标题来源打分。
+ * 5. 对索引中的每个 chunk 逐条召回和排序：
+ *    5.1 先执行实体 gate：景点检索要求 candidate_places 匹配，城市检索要求 candidate_cities 匹配。
+ *    5.2 对通过 gate 的 chunk 计算关键词命中、实体命中、标题/来源命中和 embedding 相似度。
+ *    5.3 根据是否有 query 向量、是否有实体目标选择评分权重，并计算综合总分。
+ *    5.4 过滤掉未通过 gate 或总分为 0 的 chunk，得到候选结果。
+ *    5.5 城市检索优先排列城市级 chunk，然后按总分、命中信号数量和稳定字段排序。
+ *    5.6 按 min(topK, maxChunks) 截断，生成最终返回的 results。
+ * 6. 按参数输出 JSON 或终端短预览；如指定 `--log`，额外写出可解释的召回与评分诊断日志。
+ */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +29,7 @@ import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
  */
 export const PLACE_THEMES = {
   highlights: ["推荐", "看点", "体验", "出片"],
-  drawbacks: ["缺点", "避坑", "差评", "坑", "不推荐"],
+  drawbacks: ["避雷", "缺点", "避坑", "差评", "不推荐"],
   tickets: ["门票", "票价", "预约", "开放", "优惠", "套票"],
   transport: ["停车", "入口", "导航", "交通", "路况", "自驾", "游客中心", "包车", "打车"],
   routes: ["路线", "玩法", "排队", "摆渡车", "徒步", "索道", "游船", "缆车", "观光车", "步行"],
@@ -24,11 +44,11 @@ export const CITY_THEMES = {
   lodging: ["住宿", "酒店", "民宿"],
   transport: ["停车", "路况", "导航", "限行", "交通", "自驾", "高铁", "大巴", "包车", "打车", "拼车"],
   backup_places: ["备选", "景点", "古城", "观景台"],
-  notes: ["风险", "避坑", "安全", "贴士", "天气", "海拔", "温差", "高反"],
+  notes: ["风险", "注意", "安全", "贴士", "天气", "海拔", "温差", "高反"],
 };
 
 /**
- * 解析单点检索命令参数。`--theme` 可重复传入；未传时只按实体或 query 检索。
+ * 流程 1：解析单点检索命令参数。`--theme` 可重复传入；未传时只按实体或 query 检索。
  */
 function parseArgs(argv) {
   const args = {
@@ -74,7 +94,7 @@ function parseArgs(argv) {
 }
 
 /**
- * 把空值、单值或数组统一规范成数组，兼容不同索引生成器输出。
+ * 通用辅助：把空值、单值或数组统一规范成数组，兼容不同索引生成器输出。
  */
 function asList(value) {
   if (value === null || value === undefined || value === "") return [];
@@ -82,7 +102,7 @@ function asList(value) {
 }
 
 /**
- * 清理并去重字符串数组，保留第一次出现的顺序。
+ * 通用辅助：清理并去重字符串数组，保留第一次出现的顺序。
  */
 function uniqueStrings(values) {
   const result = [];
@@ -94,7 +114,7 @@ function uniqueStrings(values) {
 }
 
 /**
- * 读取旧版 JSONL chunks。主流程使用 `rag-index.json`，这里保留兼容能力。
+ * 流程 2.1：读取旧版 JSONL chunks。主流程使用 `rag-index.json`，这里保留兼容能力。
  */
 function readJsonl(filePath) {
   return fs
@@ -112,7 +132,7 @@ function readJsonl(filePath) {
 }
 
 /**
- * 把 chunk 规范成检索内部结构。`resource_path` 只供内部匹配，不写入检索结果。
+ * 流程 2.2：把 chunk 规范成检索内部结构。`resource_path` 只供内部匹配，不写入检索结果。
  */
 function normalizeRawJsonlRow(row, index) {
   const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
@@ -133,7 +153,7 @@ function normalizeRawJsonlRow(row, index) {
 }
 
 /**
- * 加载 RAG 索引。支持新版 `rag-index.json`，也兼容旧版逐行 JSONL。
+ * 流程 2：加载 RAG 索引。支持新版 `rag-index.json`，也兼容旧版逐行 JSONL。
  */
 export function loadRagIndex(ragIndexPath) {
   const raw = fs.readFileSync(ragIndexPath, "utf8").trim();
@@ -160,7 +180,7 @@ export function loadRagIndex(ragIndexPath) {
 }
 
 /**
- * 根据 entity 类型和 theme 名称取主题词；未知 theme 直接当作关键词使用。
+ * 流程 3.2：根据 entity 类型和 theme 名称取主题词；未知 theme 直接当作关键词使用。
  */
 function themeTerms(entityType, theme) {
   if (!theme) return [];
@@ -169,7 +189,7 @@ function themeTerms(entityType, theme) {
 }
 
 /**
- * 把自由查询拆成关键词，参与 keyword score。
+ * 流程 3.3：把自由查询拆成关键词，参与 keyword score。
  */
 function queryTerms(query) {
   return String(query ?? "")
@@ -179,7 +199,7 @@ function queryTerms(query) {
 }
 
 /**
- * 生成景点/城市别名，用于标题、source_uri 和正文中的宽松实体匹配。
+ * 流程 3.1：生成景点/城市别名，用于标题、source_uri 和正文中的宽松实体匹配。
  */
 function entityAliases(entity) {
   if (!entity?.name) return [];
@@ -188,7 +208,7 @@ function entityAliases(entity) {
 }
 
 /**
- * 计算主题词和查询词命中分。命中标题、正文或 chunk.keywords 都算有效。
+ * 流程 5.2：计算主题词和查询词命中分。命中标题、正文或 chunk.keywords 都算有效。
  */
 function keywordScore(chunk, terms) {
   if (!terms.length) return 0;
@@ -201,7 +221,7 @@ function keywordScore(chunk, terms) {
 }
 
 /**
- * 计算实体命中分。结构化 candidate 命中最高，标题/source/text 里的别名命中次之。
+ * 流程 5.2：计算实体命中分。结构化 candidate 命中最高，标题/source/text 里的别名命中次之。
  */
 function entityScore(chunk, entity, aliases) {
   if (!entity?.name) return 0;
@@ -218,7 +238,7 @@ function entityScore(chunk, entity, aliases) {
 }
 
 /**
- * 标题和来源 URI 命中分，用于把明显同名的 note 往前排。
+ * 流程 5.2：计算标题和来源 URI 命中分，用于把明显同名的 note 往前排。
  */
 function titleSourceScore(chunk, aliases) {
   if (!aliases.length) return 0;
@@ -228,7 +248,7 @@ function titleSourceScore(chunk, aliases) {
 }
 
 /**
- * 记录该结果是被哪些信号召回的，方便人工检查排序原因。
+ * 流程 5.2：记录该结果是被哪些信号召回的，方便人工检查排序原因。
  */
 function matchedBy(chunk, entity, aliases, terms) {
   const matches = [];
@@ -247,14 +267,14 @@ function matchedBy(chunk, entity, aliases, terms) {
 }
 
 /**
- * 判断 chunk 是否有可参与余弦相似度计算的向量。
+ * 流程 4：判断 chunk 是否有可参与余弦相似度计算的向量。
  */
 function hasEmbedding(chunk) {
   return Array.isArray(chunk.embedding) && chunk.embedding.length > 0;
 }
 
 /**
- * 是否应该为本次检索调用 embedding API。
+ * 流程 4：判断是否应该为本次检索调用 embedding API。
  */
 function shouldUseEmbeddings(index, options) {
   if (options.noEmbedding) return false;
@@ -262,7 +282,7 @@ function shouldUseEmbeddings(index, options) {
 }
 
 /**
- * 返回第一个非空配置值，避免 CLI 默认空字符串遮住环境变量或索引元数据。
+ * 流程 4：返回第一个非空配置值，避免 CLI 默认空字符串遮住环境变量或索引元数据。
  */
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -273,7 +293,7 @@ function firstNonEmpty(...values) {
 }
 
 /**
- * 从环境变量和索引元数据中整理 embedding API 配置。
+ * 流程 4：从环境变量和索引元数据中整理 embedding API 配置。
  */
 function embeddingConfig(index, options) {
   const model = firstNonEmpty(
@@ -305,7 +325,7 @@ function embeddingConfig(index, options) {
 }
 
 /**
- * 把不同 embedding API 的响应统一成单条数值向量。
+ * 流程 4：把不同 embedding API 的响应统一成单条数值向量。
  *
  * 支持 Ollama `/api/embed` 的 `{ embeddings: [[...]] }`，旧 `/api/embeddings`
  * 的 `{ embedding: [...] }`，以及 OpenAI-compatible `{ data: [{ embedding }] }`。
@@ -327,7 +347,7 @@ function parseEmbeddingResponse(payload) {
 }
 
 /**
- * 调用真实 embedding API 为检索 query 生成向量。
+ * 流程 4：调用真实 embedding API 为检索 query 生成向量。
  */
 async function fetchEmbedding(input, config) {
   const headers = { "content-type": "application/json" };
@@ -345,7 +365,7 @@ async function fetchEmbedding(input, config) {
 }
 
 /**
- * 注入式 embedding client 便于测试；生产默认走 fetchEmbedding。
+ * 流程 4：注入式 embedding client 便于测试；生产默认走 fetchEmbedding。
  */
 async function queryEmbedding(index, query, options) {
   if (!shouldUseEmbeddings(index, options)) return [];
@@ -358,7 +378,7 @@ async function queryEmbedding(index, query, options) {
 }
 
 /**
- * 余弦相似度。返回 0..1 的非负分，避免负相关结果仅因向量项进入召回。
+ * 流程 5.2：计算余弦相似度。返回 0..1 的非负分，避免负相关结果仅因向量项进入召回。
  */
 function cosineScore(left, right) {
   if (!Array.isArray(left) || !Array.isArray(right) || !left.length || left.length !== right.length) return 0;
@@ -378,14 +398,14 @@ function cosineScore(left, right) {
 }
 
 /**
- * 保持日志中的小数稳定，避免浮点尾数干扰 diff。
+ * 通用辅助：保持日志中的小数稳定，避免浮点尾数干扰 diff。
  */
 function round4(value) {
   return Number(Number(value).toFixed(4));
 }
 
 /**
- * 根据是否启用 query embedding 和是否有实体目标选择评分权重。
+ * 流程 5.3：根据是否启用 query embedding 和是否有实体目标选择评分权重。
  */
 function scoreWeights(hasQueryVector, entity) {
   if (hasQueryVector) {
@@ -427,7 +447,7 @@ function scoreWeights(hasQueryVector, entity) {
 }
 
 /**
- * 展开每个评分分项对总分的贡献，供调试日志复盘。
+ * 流程 5.3：展开每个评分分项对总分的贡献，供调试日志复盘。
  */
 function scoreBreakdown(signals, scoring) {
   const contributions = {};
@@ -447,7 +467,7 @@ function scoreBreakdown(signals, scoring) {
 }
 
 /**
- * 输出面向 agent 阅读的检索结果；不暴露内部派生字段。
+ * 流程 5.6：输出面向 agent 阅读的检索结果；不暴露内部派生字段。
  */
 function resultForChunk(chunk, score, matches) {
   return {
@@ -464,7 +484,7 @@ function resultForChunk(chunk, score, matches) {
 }
 
 /**
- * 综合评分。优先使用真实 embedding 相似度，同时保留关键词、实体和标题来源做可解释排序兜底。
+ * 流程 5.2-5.3：综合评分。优先使用真实 embedding 相似度，同时保留关键词、实体和标题来源做可解释排序兜底。
  */
 function scoreChunk(chunk, entity, aliases, terms, queryVector) {
   const keyword = keywordScore(chunk, terms);
@@ -488,21 +508,21 @@ function scoreChunk(chunk, entity, aliases, terms, queryVector) {
 }
 
 /**
- * 判断 chunk 是否被上游明确标注为目标地点。
+ * 流程 5.1：判断 chunk 是否被上游明确标注为目标地点。
  */
 function candidatePlaceMatched(chunk, placeName) {
   return chunk.candidate_places.some((place) => relatedPlaceName(placeName, place));
 }
 
 /**
- * 判断 chunk 是否被上游明确标注为目标城市。
+ * 流程 5.1：判断 chunk 是否被上游明确标注为目标城市。
  */
 function candidateCityMatched(chunk, cityName) {
   return chunk.candidate_cities.includes(cityName);
 }
 
 /**
- * 实体检索必须先确认 chunk 归属；主题词只负责在已归属材料里排序。
+ * 流程 5.1：实体检索必须先确认 chunk 归属；主题词只负责在已归属材料里排序。
  */
 function passesEntityGate(chunk, entity) {
   if (!entity?.name) return true;
@@ -512,7 +532,7 @@ function passesEntityGate(chunk, entity) {
 }
 
 /**
- * 记录实体 gate 的具体原因，便于解释 chunk 为什么没有进入候选池。
+ * 流程 5.1：记录实体 gate 的具体原因，便于解释 chunk 为什么没有进入候选池。
  */
 function entityGate(chunk, entity) {
   if (!entity?.name) return { passed: true, reason: "query_only_no_entity_gate" };
@@ -530,7 +550,7 @@ function entityGate(chunk, entity) {
 }
 
 /**
- * 城市检索优先返回没有 candidate_places 的城市级 chunk。
+ * 流程 5.5：城市检索优先返回没有 candidate_places 的城市级 chunk。
  */
 function cityLevelPriority(result, entity) {
   if (entity?.type !== "city") return 0;
@@ -538,7 +558,7 @@ function cityLevelPriority(result, entity) {
 }
 
 /**
- * 让同分结果稳定排序，避免多次运行产生不必要的 JSON diff。
+ * 流程 5.5：让同分结果稳定排序，避免多次运行产生不必要的 JSON diff。
  */
 function compareResults(left, right) {
   return (
@@ -550,14 +570,14 @@ function compareResults(left, right) {
 }
 
 /**
- * 在城市检索中先排城市级 chunk，再使用通用分数排序。
+ * 流程 5.5：在城市检索中先排城市级 chunk，再使用通用分数排序。
  */
 function compareResultsForEntity(left, right, entity) {
   return cityLevelPriority(right, entity) - cityLevelPriority(left, entity) || compareResults(left, right);
 }
 
 /**
- * 日志只记录向量可解释摘要，不复制完整 embedding 数组，避免文件过大。
+ * 流程 6：日志只记录向量可解释摘要，不复制完整 embedding 数组，避免文件过大。
  */
 function vectorTrace(queryVector, chunk, similarity) {
   return {
@@ -570,7 +590,7 @@ function vectorTrace(queryVector, chunk, similarity) {
 }
 
 /**
- * 为单个 chunk 生成调试日志项。
+ * 流程 6：为单个 chunk 生成调试日志项。
  */
 function diagnosticForRow(row, selectedIds, eligibleRanks) {
   let recallStatus = "filtered_by_entity_gate";
@@ -596,7 +616,7 @@ function diagnosticForRow(row, selectedIds, eligibleRanks) {
 }
 
 /**
- * 生成单次 retrieve() 的完整调试日志。
+ * 流程 6：生成单次 retrieve() 的完整调试日志。
  */
 function retrievalDiagnostics({ index, query, entity, theme, aliases, terms, queryVector, topK, maxChunks, limit, rows, selectedRows, rankedRows }) {
   const selectedIds = new Set(selectedRows.map((row) => row.chunk.chunk_id));
@@ -620,7 +640,7 @@ function retrievalDiagnostics({ index, query, entity, theme, aliases, terms, que
 }
 
 /**
- * 从 retrieve() 返回值中移除调试日志，避免普通 JSON 输出过大。
+ * 流程 6：从 retrieve() 返回值中移除调试日志，避免普通 JSON 输出过大。
  */
 function withoutDiagnostics(result) {
   const { diagnostics, ...rest } = result;
@@ -628,7 +648,7 @@ function withoutDiagnostics(result) {
 }
 
 /**
- * 写出单点检索调试日志。
+ * 流程 6：写出单点检索调试日志。
  */
 export function writeRetrievalLog(logPath, payload) {
   fs.mkdirSync(path.dirname(path.resolve(logPath)), { recursive: true });
@@ -636,7 +656,7 @@ export function writeRetrievalLog(logPath, payload) {
 }
 
 /**
- * 检索入口，可被 CLI 和 `create_retrieval_workspace.mjs` 复用。
+ * 流程 2-5：检索入口，可被 CLI 和 `create_retrieval_workspace.mjs` 复用。
  */
 export async function retrieve(indexOrPath, options = {}) {
   const index = typeof indexOrPath === "string" ? loadRagIndex(indexOrPath) : indexOrPath;
@@ -703,7 +723,7 @@ export async function retrieve(indexOrPath, options = {}) {
 }
 
 /**
- * 非 JSON 模式下打印短预览，避免在终端输出过长素材。
+ * 流程 6：非 JSON 模式下打印短预览，避免在终端输出过长素材。
  */
 function printText(result) {
   console.log(`${result.entity?.type ?? "query"}: ${result.entity?.name ?? result.query}`);
@@ -715,7 +735,7 @@ function printText(result) {
 }
 
 /**
- * CLI 入口：支持一次传多个 `--theme`，JSON 模式下输出稳定结构。
+ * 流程 1-6：CLI 入口。支持一次传多个 `--theme`，JSON 模式下输出稳定结构。
  */
 async function main() {
   const args = parseArgs(process.argv.slice(2));
