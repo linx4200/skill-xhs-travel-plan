@@ -230,6 +230,52 @@ test("query without theme only uses general keyword bucket", async () => {
   );
 });
 
+test("video chunks receive a negative score contribution", async () => {
+  const videoIndex = {
+    chunks: [
+      {
+        chunk_id: "plain-note",
+        source_uri: "resources/plain-note.json",
+        resource_path: "plain-note.json",
+        kind: "json-note",
+        title: "普通笔记",
+        text: "门票需要提前预约。",
+        candidate_places: [],
+        candidate_cities: [],
+        keywords: {
+          general: ["门票"],
+        },
+        embedding: [],
+      },
+      {
+        chunk_id: "video-note",
+        source_uri: "resources/video-note.json",
+        resource_path: "video-note.json",
+        kind: "video",
+        title: "视频笔记",
+        text: "门票需要提前预约。",
+        candidate_places: [],
+        candidate_cities: [],
+        keywords: {
+          general: ["门票"],
+        },
+        embedding: [],
+      },
+    ],
+  };
+
+  const result = await retrieve(videoIndex, { query: "门票", topK: 10, maxChunks: 10, includeDiagnostics: true });
+  assert.deepEqual(
+    result.results.map((item) => item.chunk_id),
+    ["plain-note", "video-note"],
+  );
+  assert.equal(result.results[0].score > result.results[1].score, true);
+
+  const video = result.diagnostics.chunks.find((item) => item.chunk_id === "video-note");
+  assert.equal(video.score.signals.video_source_penalty, 1);
+  assert.equal(video.score.contributions.video_source_penalty, -0.15);
+});
+
 test("query embedding similarity participates in ranking when chunk embeddings exist", async () => {
   const vectorIndex = {
     embedding: { provider: "ollama", model: "test-embed", dimensions: 3 },
