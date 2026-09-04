@@ -31,7 +31,7 @@ export const PLACE_THEMES = {
   highlights: ["推荐", "看点", "体验", "出片"],
   drawbacks: ["避雷", "缺点", "避坑", "差评", "不推荐"],
   tickets: ["门票", "票价", "预约", "开放", "优惠", "套票"],
-  transport: ["停车", "入口", "导航", "交通", "路况", "自驾", "游客中心", "包车", "打车"],
+  transport: ["停车", "入口", "导航", "交通", "路况", "自驾", "塞车", "游客中心", "包车", "打车"],
   routes: ["路线", "玩法", "排队", "摆渡车", "徒步", "索道", "游船", "缆车", "观光车", "步行"],
   safety: ["老人", "小孩", "安全", "补给", "厕所", "温差", "高反", "天气", "海拔", "厕所"],
 };
@@ -146,7 +146,7 @@ function normalizeRawJsonlRow(row, index) {
     text: String(row.text ?? ""),
     candidate_places: uniqueStrings(asList(row.candidate_places)),
     candidate_cities: uniqueStrings(asList(row.candidate_cities)),
-    keywords: uniqueStrings(asList(row.keywords)),
+    keywords: normalizeKeywords(row.keywords),
     metadata,
     embedding: Array.isArray(row.embedding) ? row.embedding : [],
   };
@@ -208,14 +208,43 @@ function entityAliases(entity) {
 }
 
 /**
- * 流程 5.2：计算主题词和查询词命中分。命中标题、正文或 chunk.keywords 都算有效。
+ * 流程 5.2：规范 chunk.keywords。索引要求按 theme 分桶，并始终补齐 general。
  */
-function keywordScore(chunk, terms) {
+function normalizeKeywords(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("chunk.keywords must be an object grouped by theme.");
+  }
+  const result = {};
+  for (const [key, keywords] of Object.entries(value)) {
+    const name = String(key ?? "").trim();
+    if (!name) continue;
+    if (!Array.isArray(keywords)) throw new Error(`chunk.keywords.${name} must be an array.`);
+    result[name] = uniqueStrings(keywords);
+  }
+  if (!result.general) result.general = [];
+  return result;
+}
+
+/**
+ * 流程 5.2：取当前 theme 可用的 chunk keywords。无 theme 时只用 general；有 theme 时用 general + 当前 theme。
+ */
+function keywordsForTheme(chunk, theme) {
+  const keywords = normalizeKeywords(chunk.keywords);
+  const themeName = String(theme ?? "").trim();
+  if (!themeName) return keywords.general;
+  return uniqueStrings([...keywords.general, ...asList(keywords[themeName])]);
+}
+
+/**
+ * 流程 5.2：计算主题词和查询词命中分。命中标题、正文或当前 theme 的 chunk.keywords 都算有效。
+ */
+function keywordScore(chunk, terms, theme) {
   if (!terms.length) return 0;
   const haystack = `${chunk.title}\n${chunk.text}`;
+  const keywords = keywordsForTheme(chunk, theme);
   let hits = 0;
   for (const term of terms) {
-    if (haystack.includes(term) || chunk.keywords.includes(term)) hits += 1;
+    if (haystack.includes(term) || keywords.includes(term)) hits += 1;
   }
   return Math.min(1, hits / Math.min(terms.length, 6));
 }
@@ -250,12 +279,12 @@ function titleSourceScore(chunk, aliases) {
 /**
  * 流程 5.2：记录该结果是被哪些信号召回的，方便人工检查排序原因。
  */
-function matchedBy(chunk, entity, aliases, terms) {
+function matchedBy(chunk, entity, aliases, terms, theme) {
   const matches = [];
   const candidateMatched = entity?.type === "place" && candidatePlaceMatched(chunk, entity.name);
   const cityMatched = entity?.type === "city" && candidateCityMatched(chunk, entity.name);
   const titleSourceMatched = titleSourceScore(chunk, aliases) > 0;
-  const keywordMatched = keywordScore(chunk, terms) > 0;
+  const keywordMatched = keywordScore(chunk, terms, theme) > 0;
   const textEntityMatched = entityScore(chunk, entity, aliases) > 0 && !candidateMatched && !cityMatched && !titleSourceMatched;
 
   if (candidateMatched) matches.push("candidate_places");
@@ -413,9 +442,9 @@ function scoreWeights(hasQueryVector, entity) {
       ? {
           profile: "entity_query_embedding",
           weights: {
-            query_embedding_similarity: 0.45,
-            keyword_match: 0.25,
-            route_entity_match: 0.2,
+            query_embedding_similarity: 0.55,
+            keyword_match: 0.2,
+            route_entity_match: 0.15,
             title_source_match: 0.1,
           },
         }
@@ -484,21 +513,39 @@ function resultForChunk(chunk, score, matches) {
 }
 
 /**
- * 流程 5.2-5.3：综合评分。优先使用真实 embedding 相似度，同时保留关键词、实体和标题来源做可解释排序兜底。
+ * 流程 5.2-5.3：综合评分。
+ *
+ * 评分规则：
+ * 1. 先为 chunk 计算四个 0..1 的信号分：
+ *    - keyword_match：主题词、自由查询词或实体别名命中标题、正文、当前 theme keywords 的比例。
+ *    - route_entity_match：candidate_places/candidate_cities 或标题、来源、正文中的实体别名命中。
+ *    - title_source_match：实体别名是否命中标题、source_uri 或 resource_path。
+ *    - query_embedding_similarity：query 向量和 chunk.embedding 的非负余弦相似度。
+ * 2. 再根据是否有 queryVector、是否有实体目标选择权重 profile。
+ * 3. 总分 = 每个信号分 * 对应权重后求和，并通过 scoreBreakdown 保留 contributions 供日志解释。
+ * 4. matched_by 只记录参与召回/排序的命中信号；embedding 相似度大于 0 时额外标记 embedding。
  */
-function scoreChunk(chunk, entity, aliases, terms, queryVector) {
-  const keyword = keywordScore(chunk, terms);
+function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
+  // 计算 keyword_match：主题词、自由 query 词和实体别名在标题、正文、当前 theme keywords 中的命中比例。
+  const keyword = keywordScore(chunk, terms, theme);
+  // 计算 route_entity_match：优先看结构化 candidate 命中，其次看标题、来源、正文里的实体别名命中。
   const routeEntity = entityScore(chunk, entity, aliases);
+  // 计算 title_source_match：实体别名命中标题、source_uri 或 resource_path 时给满分。
   const titleSource = titleSourceScore(chunk, aliases);
+  // 计算 query_embedding_similarity：queryVector 与 chunk.embedding 的非负余弦相似度。
   const embedding = cosineScore(queryVector, chunk.embedding);
+  // 汇总原始信号分，字段名会和 scoreWeights() 返回的权重名一一对应。
   const signals = {
     query_embedding_similarity: embedding,
     keyword_match: keyword,
     route_entity_match: routeEntity,
     title_source_match: titleSource,
   };
+  // 按“是否有向量、是否有实体目标”选择权重，并计算各分项贡献与最终总分。
   const breakdown = scoreBreakdown(signals, scoreWeights(queryVector.length > 0, entity));
-  const matches = matchedBy(chunk, entity, aliases, terms);
+  // 生成 matched_by，供结果和诊断日志解释这个 chunk 是被哪些信号命中的。
+  const matches = matchedBy(chunk, entity, aliases, terms, theme);
+  // embedding 相似度只要大于 0，就把 embedding 也记录为命中信号。
   if (embedding > 0) matches.push("embedding");
   return {
     score: breakdown.total,
@@ -677,22 +724,27 @@ export async function retrieve(indexOrPath, options = {}) {
   // 因此当 topK > maxChunks 时，超出的 K 不会增加该 theme 的候选结果。
   const limit = Math.min(topK, maxChunks);
 
-  // 本脚本没有接入向量数据库或 kNN 检索服务，因此仍需逐一遍历本地 index.chunks，
-  const rows = index.chunks.map((chunk) => {
+  // 本脚本没有接入向量数据库或 kNN 检索服务，因此仍需遍历本地 index.chunks。
+  // 普通检索会先跳过未通过 entity gate 的 chunk，避免给明显不相关的材料计算 embedding 相似度；
+  // 只有诊断日志需要解释所有 chunk 的召回状态时，才会继续为未通过 gate 的 chunk 生成完整评分明细。
+  const rows = [];
+  for (const chunk of index.chunks) {
     const gate = entityGate(chunk, entity);
     if (gate.passed !== passesEntityGate(chunk, entity)) {
       throw new Error(`Internal entity gate mismatch for chunk: ${chunk.chunk_id}`);
     }
+    if (!gate.passed && !options.includeDiagnostics) continue;
+
     // 用 queryVector 和每个 chunk.embedding 计算相似度，再结合关键词、实体 gate 和标题/来源命中综合排序。
-    const scored = scoreChunk(chunk, entity, aliases, terms, queryVector);
-    return {
+    const scored = scoreChunk(chunk, entity, aliases, terms, queryVector, theme);
+    rows.push({
       chunk,
       gate,
       scored,
       queryVector,
       result: resultForChunk(chunk, scored.score, scored.matches),
-    };
-  });
+    });
+  }
   const rankedRows = rows
     .filter((row) => row.gate.passed && row.result.score > 0)
     .sort((left, right) => compareResultsForEntity(left.result, right.result, entity));

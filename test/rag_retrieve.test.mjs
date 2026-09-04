@@ -12,7 +12,10 @@ const index = {
       text: "A地方风大，带小孩要注意防滑。",
       candidate_places: ["A地方"],
       candidate_cities: ["甲城市"],
-      keywords: ["安全", "风大", "防滑"],
+      keywords: {
+        general: ["安全", "风大", "防滑"],
+        safety: [],
+      },
       embedding: [],
     },
     {
@@ -23,7 +26,10 @@ const index = {
       text: "B地方海拔高，早晚温差大。",
       candidate_places: ["B地方"],
       candidate_cities: ["甲城市"],
-      keywords: ["安全", "海拔", "温差"],
+      keywords: {
+        general: ["安全", "海拔", "温差"],
+        safety: [],
+      },
       embedding: [],
     },
     {
@@ -34,7 +40,9 @@ const index = {
       text: "A地方早晚温差大，建议带外套。",
       candidate_places: [],
       candidate_cities: ["甲城市"],
-      keywords: ["温差"],
+      keywords: {
+        general: ["温差"],
+      },
       embedding: [],
     },
     {
@@ -45,7 +53,11 @@ const index = {
       text: "甲城市住宿建议选老城附近，自驾停车更方便。",
       candidate_places: [],
       candidate_cities: ["甲城市"],
-      keywords: ["住宿", "停车", "交通"],
+      keywords: {
+        general: ["住宿", "停车", "交通"],
+        transport: [],
+        lodging: [],
+      },
       embedding: [],
     },
     {
@@ -56,7 +68,10 @@ const index = {
       text: "乙城市住宿建议选高铁站附近。",
       candidate_places: [],
       candidate_cities: ["乙城市"],
-      keywords: ["住宿", "交通"],
+      keywords: {
+        general: ["住宿", "交通"],
+        lodging: [],
+      },
       embedding: [],
     },
     {
@@ -67,7 +82,9 @@ const index = {
       text: "山区天气变化快，注意保暖。",
       candidate_places: [],
       candidate_cities: [],
-      keywords: ["安全", "天气"],
+      keywords: {
+        general: ["安全", "天气"],
+      },
       embedding: [],
     },
   ],
@@ -114,6 +131,105 @@ test("city retrieval does not fall back to title or text city matches without ca
   );
 });
 
+test("theme-specific keywords only use general and current theme buckets", async () => {
+  const themeIndex = {
+    chunks: [
+      {
+        chunk_id: "ticket-keyword",
+        source_uri: "resources/ticket-keyword.json",
+        resource_path: "ticket-keyword.json",
+        title: "候选一",
+        text: "没有直接命中词。",
+        candidate_places: [],
+        candidate_cities: [],
+        keywords: {
+          general: [],
+          tickets: ["门票"],
+          transport: [],
+        },
+        embedding: [],
+      },
+      {
+        chunk_id: "transport-keyword",
+        source_uri: "resources/transport-keyword.json",
+        resource_path: "transport-keyword.json",
+        title: "候选二",
+        text: "没有直接命中词。",
+        candidate_places: [],
+        candidate_cities: [],
+        keywords: {
+          general: [],
+          tickets: [],
+          transport: ["门票"],
+        },
+        embedding: [],
+      },
+      {
+        chunk_id: "general-keyword",
+        source_uri: "resources/general-keyword.json",
+        resource_path: "general-keyword.json",
+        title: "候选三",
+        text: "没有直接命中词。",
+        candidate_places: [],
+        candidate_cities: [],
+        keywords: {
+          general: ["门票"],
+          tickets: [],
+          transport: [],
+        },
+        embedding: [],
+      },
+    ],
+  };
+
+  const result = await retrieve(themeIndex, { query: "门票", theme: "tickets", topK: 10, maxChunks: 10 });
+  assert.deepEqual(
+    result.results.map((item) => item.chunk_id),
+    ["general-keyword", "ticket-keyword"],
+  );
+});
+
+test("query without theme only uses general keyword bucket", async () => {
+  const themeIndex = {
+    chunks: [
+      {
+        chunk_id: "theme-only-keyword",
+        source_uri: "resources/theme-only-keyword.json",
+        resource_path: "theme-only-keyword.json",
+        title: "候选一",
+        text: "没有直接命中词。",
+        candidate_places: [],
+        candidate_cities: [],
+        keywords: {
+          general: [],
+          tickets: ["门票"],
+        },
+        embedding: [],
+      },
+      {
+        chunk_id: "general-keyword",
+        source_uri: "resources/general-keyword.json",
+        resource_path: "general-keyword.json",
+        title: "候选二",
+        text: "没有直接命中词。",
+        candidate_places: [],
+        candidate_cities: [],
+        keywords: {
+          general: ["门票"],
+          tickets: [],
+        },
+        embedding: [],
+      },
+    ],
+  };
+
+  const result = await retrieve(themeIndex, { query: "门票", topK: 10, maxChunks: 10 });
+  assert.deepEqual(
+    result.results.map((item) => item.chunk_id),
+    ["general-keyword"],
+  );
+});
+
 test("query embedding similarity participates in ranking when chunk embeddings exist", async () => {
   const vectorIndex = {
     embedding: { provider: "ollama", model: "test-embed", dimensions: 3 },
@@ -126,7 +242,9 @@ test("query embedding similarity participates in ranking when chunk embeddings e
         text: "徒步路线很轻松。",
         candidate_places: [],
         candidate_cities: [],
-        keywords: ["徒步"],
+        keywords: {
+          general: ["徒步"],
+        },
         embedding: [0, 1, 0],
       },
       {
@@ -137,7 +255,9 @@ test("query embedding similarity participates in ranking when chunk embeddings e
         text: "需要预留体力。",
         candidate_places: [],
         candidate_cities: [],
-        keywords: [],
+        keywords: {
+          general: [],
+        },
         embedding: [1, 0, 0],
       },
     ],
