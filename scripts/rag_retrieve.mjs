@@ -669,6 +669,7 @@ export async function retrieve(indexOrPath, options = {}) {
   const aliases = entityAliases(entity);
   const terms = uniqueStrings([...themeTerms(entity?.type, theme), ...queryTerms(options.query), ...aliases]);
   const query = uniqueStrings([entity?.name, ...themeTerms(entity?.type, theme), options.query]).join(" ");
+  // 这里的 embedding API 只负责把本次 query 转成向量，不负责从索引里返回最相似的 chunk。
   const queryVector = await queryEmbedding(index, query, options);
   const topK = Number(options.topK ?? 5);
   const maxChunks = Number(options.maxChunks ?? 20);
@@ -676,11 +677,13 @@ export async function retrieve(indexOrPath, options = {}) {
   // 因此当 topK > maxChunks 时，超出的 K 不会增加该 theme 的候选结果。
   const limit = Math.min(topK, maxChunks);
 
+  // 本脚本没有接入向量数据库或 kNN 检索服务，因此仍需逐一遍历本地 index.chunks，
   const rows = index.chunks.map((chunk) => {
     const gate = entityGate(chunk, entity);
     if (gate.passed !== passesEntityGate(chunk, entity)) {
       throw new Error(`Internal entity gate mismatch for chunk: ${chunk.chunk_id}`);
     }
+    // 用 queryVector 和每个 chunk.embedding 计算相似度，再结合关键词、实体 gate 和标题/来源命中综合排序。
     const scored = scoreChunk(chunk, entity, aliases, terms, queryVector);
     return {
       chunk,
