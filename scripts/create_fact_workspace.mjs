@@ -103,6 +103,21 @@ function uniqueStrings(values) {
 }
 
 /**
+ * 将 RAG chunk 的 theme 分桶 keywords 展平成 facts workspace 使用的关键词合集。
+ */
+function flattenKeywordBuckets(keywords) {
+  if (!keywords || typeof keywords !== "object" || Array.isArray(keywords)) {
+    throw new Error("chunk.keywords must be an object grouped by theme.");
+  }
+  const values = [];
+  for (const [theme, items] of Object.entries(keywords)) {
+    if (!Array.isArray(items)) throw new Error(`chunk.keywords.${theme} must be an array.`);
+    values.push(...items);
+  }
+  return uniqueStrings(values);
+}
+
+/**
  * 将 RAG index 适配成 facts skeleton 所需的最小素材索引。
  */
 function indexFromRag(ragIndexPath) {
@@ -124,7 +139,7 @@ function indexFromRag(ragIndexPath) {
     existing.char_count += String(chunk.text ?? "").length;
     existing.candidate_places = uniqueStrings([...existing.candidate_places, ...(chunk.candidate_places ?? [])]);
     existing.candidate_cities = uniqueStrings([...existing.candidate_cities, ...(chunk.candidate_cities ?? [])]);
-    existing.keywords = uniqueStrings([...existing.keywords, ...(chunk.keywords ?? [])]);
+    existing.keywords = uniqueStrings([...existing.keywords, ...flattenKeywordBuckets(chunk.keywords)]);
     if (!existing.excerpt && chunk.text) existing.excerpt = String(chunk.text).replace(/\s+/g, " ").trim().slice(0, 180);
     filesByPath.set(sourcePath, existing);
   }
