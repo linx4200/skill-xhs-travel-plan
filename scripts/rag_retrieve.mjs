@@ -28,10 +28,10 @@ import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
  * 景点级检索主题。每个 theme 对应一组用于关键词召回和排序的中文触发词。
  */
 export const PLACE_THEMES = {
-  highlights: ["推荐", "看点", "体验", "出片"],
+  highlights: ["推荐", "看点", "出片", "历史"],
   drawbacks: ["避雷", "缺点", "避坑", "差评", "不推荐"],
   tickets: ["门票", "票价", "预约", "开放", "优惠", "套票"],
-  transport: ["停车", "入口", "导航", "交通", "路况", "自驾", "塞车", "游客中心", "包车", "打车"],
+  transport: ["停车", "导航", "交通", "路况", "自驾", "塞车", "包车", "打车"],
   routes: ["路线", "玩法", "排队", "摆渡车", "徒步", "索道", "游船", "缆车", "观光车", "步行"],
   safety: ["老人", "小孩", "安全", "补给", "厕所", "温差", "高反", "天气", "海拔", "厕所"],
 };
@@ -46,6 +46,8 @@ export const CITY_THEMES = {
   backup_places: ["备选", "景点", "古城", "观景台"],
   notes: ["风险", "注意", "安全", "贴士", "天气", "海拔", "温差", "高反"],
 };
+
+const VIDEO_CHUNK_PENALTY_WEIGHT = -0.15;
 
 /**
  * 流程 1：解析单点检索命令参数。`--theme` 可重复传入；未传时只按实体或 query 检索。
@@ -142,6 +144,7 @@ function normalizeRawJsonlRow(row, index) {
     chunk_id: String(row.chunk_id ?? `${sourceUri}#note`),
     source_uri: sourceUri,
     resource_path: resourcePath,
+    kind: String(row.kind ?? metadata.kind ?? ""),
     title: String(row.title ?? metadata.title ?? sourceUri),
     text: String(row.text ?? ""),
     candidate_places: uniqueStrings(asList(row.candidate_places)),
@@ -434,6 +437,23 @@ function round4(value) {
 }
 
 /**
+ * 流程 5.2：判断 chunk 是否来自视频素材。优先看结构化 kind/metadata，路径和标题只作为兜底线索。
+ */
+function isVideoChunk(chunk) {
+  const values = [
+    chunk.kind,
+    chunk.metadata?.kind,
+    chunk.metadata?.source_kind,
+    chunk.metadata?.source_type,
+    chunk.metadata?.media_type,
+    chunk.source_uri,
+    chunk.resource_path,
+    chunk.title,
+  ];
+  return values.some((value) => /(^|[-_\s/])video($|[-_\s/.])|视频/i.test(String(value ?? "")));
+}
+
+/**
  * 流程 5.3：根据是否启用 query embedding 和是否有实体目标选择评分权重。
  */
 function scoreWeights(hasQueryVector, entity) {
@@ -446,6 +466,7 @@ function scoreWeights(hasQueryVector, entity) {
             keyword_match: 0.2,
             route_entity_match: 0.15,
             title_source_match: 0.1,
+            video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
           },
         }
       : {
@@ -454,6 +475,7 @@ function scoreWeights(hasQueryVector, entity) {
             query_embedding_similarity: 0.7,
             keyword_match: 0.2,
             title_source_match: 0.1,
+            video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
           },
         };
   }
@@ -464,6 +486,7 @@ function scoreWeights(hasQueryVector, entity) {
           keyword_match: 0.45,
           route_entity_match: 0.35,
           title_source_match: 0.2,
+          video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
         },
       }
     : {
@@ -471,6 +494,7 @@ function scoreWeights(hasQueryVector, entity) {
         weights: {
           keyword_match: 0.8,
           title_source_match: 0.2,
+          video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
         },
       };
 }
@@ -516,11 +540,12 @@ function resultForChunk(chunk, score, matches) {
  * 流程 5.2-5.3：综合评分。
  *
  * 评分规则：
- * 1. 先为 chunk 计算四个 0..1 的信号分：
+ * 1. 先为 chunk 计算五个信号分：
  *    - keyword_match：主题词、自由查询词或实体别名命中标题、正文、当前 theme keywords 的比例。
  *    - route_entity_match：candidate_places/candidate_cities 或标题、来源、正文中的实体别名命中。
  *    - title_source_match：实体别名是否命中标题、source_uri 或 resource_path。
  *    - query_embedding_similarity：query 向量和 chunk.embedding 的非负余弦相似度。
+ *    - video_source_penalty：视频来源 chunk 记为 1，非视频记为 0；该信号使用负权重降低视频素材排序。
  * 2. 再根据是否有 queryVector、是否有实体目标选择权重 profile。
  * 3. 总分 = 每个信号分 * 对应权重后求和，并通过 scoreBreakdown 保留 contributions 供日志解释。
  * 4. matched_by 只记录参与召回/排序的命中信号；embedding 相似度大于 0 时额外标记 embedding。
@@ -534,12 +559,15 @@ function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
   const titleSource = titleSourceScore(chunk, aliases);
   // 计算 query_embedding_similarity：queryVector 与 chunk.embedding 的非负余弦相似度。
   const embedding = cosineScore(queryVector, chunk.embedding);
+  // 计算 video_source_penalty：视频 chunk 记为 1，后续乘以负权重，降低但不直接剔除。
+  const videoPenalty = isVideoChunk(chunk) ? 1 : 0;
   // 汇总原始信号分，字段名会和 scoreWeights() 返回的权重名一一对应。
   const signals = {
     query_embedding_similarity: embedding,
     keyword_match: keyword,
     route_entity_match: routeEntity,
     title_source_match: titleSource,
+    video_source_penalty: videoPenalty,
   };
   // 按“是否有向量、是否有实体目标”选择权重，并计算各分项贡献与最终总分。
   const breakdown = scoreBreakdown(signals, scoreWeights(queryVector.length > 0, entity));
