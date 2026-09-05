@@ -85,7 +85,7 @@ RAG 分支填 facts 时，agent 应按 `unique_chunk_ids` 到顶层 `chunks_by_i
 
 - `schema_version`：日志结构版本。
 - `source`：输入索引、facts workspace 和 retrieval workspace 相关路径；批量流程会复用 `retrieval-workspace.json` 的 `source`。
-- `retrieval`：批量流程的检索主题、topK、maxChunks 和评分策略；单点 `rag_retrieve.mjs --log` 可不存在。
+- `retrieval`：批量流程的检索主题、每 theme 返回数量、跨 theme 阅读池上限和评分策略；`rag_retrieve.mjs --log` 的单次检索日志可不存在。
 - `summary`：批量流程的请求数、chunk 评估次数和 selected 结果数。
 - `request_count`：单点检索日志的请求数量。
 - `requests[]`：每次实际 retrieve 调用的完整诊断。
@@ -95,7 +95,7 @@ RAG 分支填 facts 时，agent 应按 `unique_chunk_ids` 到顶层 `chunks_by_i
 - `target_type`、`target_name`：批量流程中的地点或城市目标；单点检索可不存在。
 - `query`、`entity`、`theme`：本次检索请求。
 - `terms`、`aliases`：参与关键词/别名匹配的词。
-- `top_k`、`max_chunks`、`returned_limit`：本次检索限制。
+- `top_k`：本次检索最多返回多少条 chunk。
 - `index_chunk_count`：索引总 chunk 数。
 - `query_embedding.used`、`dimensions`：是否生成 query embedding 以及向量维度。
 - `chunks[]`：该请求下每个 chunk 的评估日志。

@@ -34,26 +34,19 @@ export const CITY_THEMES = {
 };
 
 export const RAG_RETRIEVAL_DEFAULTS = {
-  // 单点 rag:retrieve 未传 --top-k 时，每个检索请求最多返回多少条 chunk。
-  singleTopK: 3,
-
-  // 单点 rag:retrieve 未传 --max-chunks 时，单个请求最多允许进入最终结果的 chunk 数。
-  // 最终返回数量是 min(singleTopK, singleMaxChunks)。
-  singleMaxChunks: 20,
-
-  // 批量 rag:workspace 中，每个景点的每个 theme 最多保留多少条结果。
+  // 正式生成：每个景点的每个 theme 最多拿多少条 chunk。
   // 对应 CLI: --place-top-k；输出字段仍叫 retrieval.place_top_k。
   placeMaxThemeChunks: 5,
 
-  // 批量 rag:workspace 中，每个城市的每个 theme 最多保留多少条结果。
+  // 正式生成：每个城市的每个 theme 最多拿多少条 chunk。
   // 对应 CLI: --city-top-k；输出字段仍叫 retrieval.city_top_k。
   cityMaxThemeChunks: 4,
 
-  // 批量 rag:workspace 中，单个景点跨全部 themes 去重后的阅读池最大 chunk 数。
+  // 正式生成：一个景点所有 themes 合起来最多读多少条 chunk。
   // 对应 CLI: --max-place-chunks。
   maxPlaceChunks: 45,
 
-  // 批量 rag:workspace 中，单个城市跨全部 themes 去重后的阅读池最大 chunk 数。
+  // 正式生成：一个城市所有 themes 合起来最多读多少条 chunk。
   // 对应 CLI: --max-city-chunks。
   maxCityChunks: 24,
 
@@ -65,4 +58,8 @@ export const RAG_RETRIEVAL_DEFAULTS = {
 
   // retrieval_health 判定城市召回偏少的阈值；低于该值会给 weak warning，不会直接过滤结果。
   minHealthyCityChunks: 2,
+
+  // 仅调试：手动运行 rag:retrieve 且没传 --top-k 时，默认显示多少条 chunk。
+  // 正式生成走 rag:workspace，不看这个值。
+  ragRetrieveResultChunks: 8,
 };
