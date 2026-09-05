@@ -21,12 +21,11 @@ RAG 介入 facts 生成的总体设计见 [rag-facts-framework.md](rag-facts-fra
   "title": "九洞天自驾喂饭教程",
   "text": "完整小红书笔记文本",
   "candidate_places": ["九洞天"],
-  "candidate_cities": ["毕节"],
-  "keywords": ["门票", "停车", "自驾"]
+  "candidate_cities": ["毕节"]
 }
 ```
 
-`candidate_places`、`candidate_cities` 和 `keywords` 必须是该条笔记实际命中的结果，不是候选全集。
+`candidate_places` 和 `candidate_cities` 必须是该条笔记实际命中的结果，不是候选全集。
 
 ## Step 1：创建 Route Structure
 
@@ -39,7 +38,7 @@ RAG 介入 facts 生成的总体设计见 [rag-facts-framework.md](rag-facts-fra
 用脚本读取并校验 `rag-index.json`，不要直接打印或预览完整索引：
 
 - 顶层应能解析为 JSON 或 JSONL。
-- chunk 应包含可用于检索的 `chunk_id`、`source_uri`、`title`、`text`、`candidate_places`、`candidate_cities` 和 `keywords`。
+- chunk 应包含可用于检索的 `chunk_id`、`source_uri`、`title`、`text`、`candidate_places` 和 `candidate_cities`。
 - 如果需要渲染本地照片，`resource_root` 应指向可读资源目录，且照片应位于 `photos/` 下。
 
 如果 `rag-index.json` 与用户描述不符，让后续工作区脚本自然失败并停止流程，向用户报告脚本错误即可。命令输出只保留统计、错误和少量标题级摘要；不要把 `chunks[].text` 或 `embedding` 打印到对话上下文。
