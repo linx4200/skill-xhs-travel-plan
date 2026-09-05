@@ -12,7 +12,7 @@
  * 4. 在可用时调用 embedding API 生成 query 向量；否则退回到纯关键词、实体和标题来源打分。
  * 5. 对索引中的每个 chunk 逐条召回和排序：
  *    5.1 先执行实体 gate：景点检索要求 candidate_places 匹配，城市检索要求 candidate_cities 匹配。
- *    5.2 对通过 gate 的 chunk 计算关键词命中、实体命中、标题/来源命中和 embedding 相似度。
+ *    5.2 对通过 gate 的 chunk 计算标题/正文关键词命中、实体命中、标题/来源命中和 embedding 相似度。
  *    5.3 根据是否有 query 向量、是否有实体目标选择评分权重，并计算综合总分。
  *    5.4 过滤掉未通过 gate 或总分为 0 的 chunk，得到候选结果。
  *    5.5 城市检索优先排列城市级 chunk，然后按总分、命中信号数量和稳定字段排序。
@@ -152,7 +152,6 @@ function normalizeRawJsonlRow(row, index) {
     text: String(row.text ?? ""),
     candidate_places: uniqueStrings(asList(row.candidate_places)),
     candidate_cities: uniqueStrings(asList(row.candidate_cities)),
-    keywords: normalizeKeywords(row.keywords),
     metadata,
     embedding: Array.isArray(row.embedding) ? row.embedding : [],
   };
@@ -214,55 +213,17 @@ function entityAliases(entity) {
 }
 
 /**
- * 流程 5.2：规范 chunk.keywords。索引要求按 theme 分桶，并始终补齐 general。
- */
-function normalizeKeywords(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("chunk.keywords must be an object grouped by theme.");
-  }
-  const result = {};
-  for (const [key, keywords] of Object.entries(value)) {
-    const name = String(key ?? "").trim();
-    if (!name) continue;
-    if (!Array.isArray(keywords)) throw new Error(`chunk.keywords.${name} must be an array.`);
-    result[name] = uniqueStrings(keywords);
-  }
-  if (!result.general) result.general = [];
-  return result;
-}
-
-/**
- * 流程 5.2：取当前 theme 可用的 chunk keywords。无 theme 时只用 general；有 theme 时只用当前 theme。
- */
-function keywordsForTheme(chunk, theme) {
-  const keywords = normalizeKeywords(chunk.keywords);
-  const themeName = String(theme ?? "").trim();
-  if (!themeName) return keywords.general;
-  return asList(keywords[themeName]);
-}
-
-/**
- * 流程 5.2：计算主题词和查询词命中分。命中标题、正文或当前 theme 的 chunk.keywords 都算有效。
+ * 流程 5.2：计算主题词和查询词命中分。只匹配标题和正文。
  *
- * 这里有两类 keywords：
- * 1. terms：本次检索生成的关键词，来自 themeTerms(theme)、queryTerms(query) 和实体别名。
- * 2. keywords：当前 chunk 自己带的 `chunk.keywords[theme]`，作为除标题/正文以外的可命中字段。
- *
- * 例：城市检索 `--city 甲城市 --theme transport` 时，themeTerms 会给 terms 加入
- * `停车/路况/导航/限行/交通/自驾/高铁/大巴/包车/打车/拼车`，实体别名再加入
- * `甲城市`。如果某个 chunk 标题是 `甲城市住宿交通`，正文没有写自驾或停车，
- * 但它的 `chunk.keywords.transport` 是 `["停车", "自驾"]`，那么命中来自：
- * - 标题/正文：`甲城市`、`交通`
- * - chunk keywords：`停车`、`自驾`
- * 共 4 个词，分数是 `4 / min(12, 6) = 0.6667`；命中 6 个及以上会封顶为 1。
+ * terms 来自 themeTerms(theme)、queryTerms(query) 和实体别名。
+ * 每命中一个词累加一次，分母最多按 6 个词计；命中 6 个及以上会封顶为 1。
  */
-function keywordScore(chunk, terms, theme) {
+function keywordScore(chunk, terms) {
   if (!terms.length) return 0;
   const haystack = `${chunk.title}\n${chunk.text}`;
-  const keywords = keywordsForTheme(chunk, theme);
   let hits = 0;
   for (const term of terms) {
-    if (haystack.includes(term) || keywords.includes(term)) hits += 1;
+    if (haystack.includes(term)) hits += 1;
   }
   return Math.min(1, hits / Math.min(terms.length, 6));
 }
@@ -297,12 +258,12 @@ function titleSourceScore(chunk, aliases) {
 /**
  * 流程 5.2：记录该结果是被哪些信号召回的，方便人工检查排序原因。
  */
-function matchedBy(chunk, entity, aliases, terms, theme) {
+function matchedBy(chunk, entity, aliases, terms) {
   const matches = [];
   const candidateMatched = entity?.type === "place" && candidatePlaceMatched(chunk, entity.name);
   const cityMatched = entity?.type === "city" && candidateCityMatched(chunk, entity.name);
   const titleSourceMatched = titleSourceScore(chunk, aliases) > 0;
-  const keywordMatched = keywordScore(chunk, terms, theme) > 0;
+  const keywordMatched = keywordScore(chunk, terms) > 0;
   const textEntityMatched = entityScore(chunk, entity, aliases) > 0 && !candidateMatched && !cityMatched && !titleSourceMatched;
 
   if (candidateMatched) matches.push("candidate_places");
@@ -546,7 +507,6 @@ function resultForChunk(chunk, score, matches) {
     matched_by: matches,
     candidate_places: chunk.candidate_places,
     candidate_cities: chunk.candidate_cities,
-    keywords: chunk.keywords,
     text: chunk.text,
   };
 }
@@ -556,7 +516,7 @@ function resultForChunk(chunk, score, matches) {
  *
  * 评分规则：
  * 1. 先为 chunk 计算五个信号分：
- *    - keyword_match：主题词、自由查询词或实体别名命中标题、正文、当前 theme keywords 的比例。
+ *    - keyword_match：主题词、自由查询词或实体别名命中标题或正文的比例。
  *    - route_entity_match：candidate_places/candidate_cities 或标题、来源、正文中的实体别名命中。
  *    - title_source_match：实体别名是否命中标题、source_uri 或 resource_path。
  *    - query_embedding_similarity：query 向量和 chunk.embedding 的非负余弦相似度。
@@ -565,9 +525,9 @@ function resultForChunk(chunk, score, matches) {
  * 3. 总分 = 每个信号分 * 对应权重后求和，并通过 scoreBreakdown 保留 contributions 供日志解释。
  * 4. matched_by 只记录参与召回/排序的命中信号；embedding 相似度大于 0 时额外标记 embedding。
  */
-function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
-  // 计算 keyword_match：主题词、自由 query 词和实体别名在标题、正文、当前 theme keywords 中的命中比例。
-  const keyword = keywordScore(chunk, terms, theme);
+function scoreChunk(chunk, entity, aliases, terms, queryVector) {
+  // 计算 keyword_match：主题词、自由 query 词和实体别名在标题、正文中的命中比例。
+  const keyword = keywordScore(chunk, terms);
   // 计算 route_entity_match：优先看结构化 candidate 命中，其次看标题、来源、正文里的实体别名命中。
   const routeEntity = entityScore(chunk, entity, aliases);
   // 计算 title_source_match：实体别名命中标题、source_uri 或 resource_path 时给满分。
@@ -587,7 +547,7 @@ function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
   // 按“是否有向量、是否有实体目标”选择权重，并计算各分项贡献与最终总分。
   const breakdown = scoreBreakdown(signals, scoreWeights(queryVector.length > 0, entity));
   // 生成 matched_by，供结果和诊断日志解释这个 chunk 是被哪些信号命中的。
-  const matches = matchedBy(chunk, entity, aliases, terms, theme);
+  const matches = matchedBy(chunk, entity, aliases, terms);
   // embedding 相似度只要大于 0，就把 embedding 也记录为命中信号。
   if (embedding > 0) matches.push("embedding");
   return {
@@ -701,7 +661,6 @@ function diagnosticForRow(row, selectedIds, eligibleRanks) {
     score: row.scored.breakdown,
     candidate_places: row.chunk.candidate_places,
     candidate_cities: row.chunk.candidate_cities,
-    keywords: row.chunk.keywords,
   };
 }
 
@@ -779,7 +738,7 @@ export async function retrieve(indexOrPath, options = {}) {
     if (!gate.passed && !options.includeDiagnostics) continue;
 
     // 用 queryVector 和每个 chunk.embedding 计算相似度，再结合关键词、实体 gate 和标题/来源命中综合排序。
-    const scored = scoreChunk(chunk, entity, aliases, terms, queryVector, theme);
+    const scored = scoreChunk(chunk, entity, aliases, terms, queryVector);
     rows.push({
       chunk,
       gate,

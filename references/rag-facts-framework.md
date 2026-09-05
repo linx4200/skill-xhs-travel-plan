@@ -124,12 +124,12 @@ unresolved high-risk fields or conflicts
 
 阶段 1 继续按 `structured-generation-workflow.md` 和 `info-rules.md` 的既有规则，由 agent 解析用户路线并创建 `route-structure.json`。路线解析边界、真实游玩地点、短停点、城市和住宿/中转点的判断继续沿用现有逻辑。
 
-阶段 2 不再使用 `scan_resources.mjs` 创建 `resource-index.json`。RAG index 已经包含 chunk text、候选地点、候选城市、关键词和来源 URI；重复扫描原始素材会增加一个低价值中间文件，并重新引入原材料回读心智负担。不要直接打印或预览完整 RAG index；脚本解析失败时停止流程并报告错误。
+阶段 2 不再使用 `scan_resources.mjs` 创建 `resource-index.json`。RAG index 已经包含 chunk text、候选地点、候选城市和来源 URI；重复扫描原始素材会增加一个低价值中间文件，并重新引入原材料回读心智负担。不要直接打印或预览完整 RAG index；脚本解析失败时停止流程并报告错误。
 
 阶段 2 需要确认：
 
 - `rag-index.json` 可以被解析为 JSON 或 JSONL。
-- chunks 至少包含 `chunk_id`、`source_uri`、`title`、`text`、`candidate_places`、`candidate_cities` 和 `keywords`。
+- chunks 至少包含 `chunk_id`、`source_uri`、`title`、`text`、`candidate_places` 和 `candidate_cities`。
 - 如需渲染本地照片，`resource_root` 指向可读目录，且照片位于 `photos/` 下。照片只影响渲染素材归属，不意味着要回读原始文本。
 
 本框架后续重点从阶段 3 开始：如何直接基于 `rag-index.json` 创建 skeleton `facts-workspace.json`，如何批量创建 `retrieval-workspace.json`，以及如何用字段级 checklist 驱动补检索和缺口处理。
@@ -465,9 +465,6 @@ unresolved high-risk fields or conflicts
       // 该 chunk 被上游标注命中的候选城市。
       "candidate_cities": ["城市A"],
 
-      // 该 chunk 的实用关键词，来自 rag-index.json。
-      "keywords": ["拍照", "观景台", "避坑"],
-
       // note chunk 原文。第四步允许保留，供 agent 填 facts 时阅读。
       // 不要把 text 直接复制到最终 HTML；必须经过事实判断、去重和改写。
       "text": "小红书 note 原文..."
@@ -479,7 +476,6 @@ unresolved high-risk fields or conflicts
       "title": "路线地点A交通笔记",
       "candidate_places": ["路线地点A"],
       "candidate_cities": ["城市A"],
-      "keywords": ["停车", "入口", "导航"],
       "text": "小红书 note 原文..."
     },
 
@@ -489,7 +485,6 @@ unresolved high-risk fields or conflicts
       "title": "城市A吃饭笔记",
       "candidate_places": [],
       "candidate_cities": ["城市A"],
-      "keywords": ["美食", "餐厅", "避坑"],
       "text": "小红书 note 原文..."
     },
 
@@ -499,7 +494,6 @@ unresolved high-risk fields or conflicts
       "title": "城市A住宿交通笔记",
       "candidate_places": [],
       "candidate_cities": ["城市A"],
-      "keywords": ["住宿", "停车", "交通"],
       "text": "小红书 note 原文..."
     }
   },
@@ -539,7 +533,7 @@ unresolved high-risk fields or conflicts
       },
 
       // 主题命中索引。这里只保存 chunk_id、score 和 matched_by，
-      // 不重复保存 title、source_uri、keywords 或 text。
+      // 不重复保存 title、source_uri 或 text。
       // Agent 补某个字段时先看对应 theme，再到顶层 chunks_by_id 读取原文。
       "themes": {
         // 看点、体验、拍照、推荐理由。

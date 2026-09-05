@@ -107,7 +107,6 @@ function chunkRecord(result) {
     title: result.title,
     candidate_places: result.candidate_places,
     candidate_cities: result.candidate_cities,
-    keywords: result.keywords,
     text: result.text,
   };
 }
