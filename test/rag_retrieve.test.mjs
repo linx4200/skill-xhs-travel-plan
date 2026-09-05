@@ -131,7 +131,7 @@ test("city retrieval does not fall back to title or text city matches without ca
   );
 });
 
-test("theme-specific keywords only use general and current theme buckets", async () => {
+test("theme-specific keywords only use the current theme bucket", async () => {
   const themeIndex = {
     chunks: [
       {
@@ -185,7 +185,7 @@ test("theme-specific keywords only use general and current theme buckets", async
   const result = await retrieve(themeIndex, { query: "门票", theme: "tickets", topK: 10, maxChunks: 10 });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
-    ["general-keyword", "ticket-keyword"],
+    ["ticket-keyword"],
   );
 });
 

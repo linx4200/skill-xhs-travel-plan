@@ -28,12 +28,12 @@ import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
  * 景点级检索主题。每个 theme 对应一组用于关键词召回和排序的中文触发词。
  */
 export const PLACE_THEMES = {
-  highlights: ["推荐", "看点", "出片", "历史"],
+  highlights: ["推荐", "看点", "出片", "宝藏"],
   drawbacks: ["避雷", "缺点", "避坑", "差评", "不推荐"],
   tickets: ["门票", "票价", "预约", "开放", "优惠", "套票"],
   transport: ["停车", "导航", "交通", "路况", "自驾", "塞车", "包车", "打车"],
-  routes: ["路线", "玩法", "排队", "摆渡车", "徒步", "索道", "游船", "缆车", "观光车", "步行"],
-  safety: ["老人", "小孩", "安全", "补给", "厕所", "温差", "高反", "天气", "海拔", "厕所"],
+  routes: ["路线", "玩法", "排队", "人流", "摆渡车", "徒步", "索道", "游船", "缆车", "观光车", "步行"],
+  safety: ["老人", "小孩", "安全", "补给", "厕所", "温差", "高反", "天气", "海拔"],
 };
 
 /**
@@ -43,7 +43,7 @@ export const CITY_THEMES = {
   foods: ["美食", "餐厅", "小吃", "夜市"],
   lodging: ["住宿", "酒店", "民宿"],
   transport: ["停车", "路况", "导航", "限行", "交通", "自驾", "高铁", "大巴", "包车", "打车", "拼车"],
-  backup_places: ["备选", "景点", "古城", "观景台"],
+  backup_places: ["备选", "景点", "观景台", "打卡点", "冷门", "小众"],
   notes: ["风险", "注意", "安全", "贴士", "天气", "海拔", "温差", "高反"],
 };
 
@@ -229,17 +229,29 @@ function normalizeKeywords(value) {
 }
 
 /**
- * 流程 5.2：取当前 theme 可用的 chunk keywords。无 theme 时只用 general；有 theme 时用 general + 当前 theme。
+ * 流程 5.2：取当前 theme 可用的 chunk keywords。无 theme 时只用 general；有 theme 时只用当前 theme。
  */
 function keywordsForTheme(chunk, theme) {
   const keywords = normalizeKeywords(chunk.keywords);
   const themeName = String(theme ?? "").trim();
   if (!themeName) return keywords.general;
-  return uniqueStrings([...keywords.general, ...asList(keywords[themeName])]);
+  return asList(keywords[themeName]);
 }
 
 /**
  * 流程 5.2：计算主题词和查询词命中分。命中标题、正文或当前 theme 的 chunk.keywords 都算有效。
+ *
+ * 这里有两类 keywords：
+ * 1. terms：本次检索生成的关键词，来自 themeTerms(theme)、queryTerms(query) 和实体别名。
+ * 2. keywords：当前 chunk 自己带的 `chunk.keywords[theme]`，作为除标题/正文以外的可命中字段。
+ *
+ * 例：城市检索 `--city 甲城市 --theme transport` 时，themeTerms 会给 terms 加入
+ * `停车/路况/导航/限行/交通/自驾/高铁/大巴/包车/打车/拼车`，实体别名再加入
+ * `甲城市`。如果某个 chunk 标题是 `甲城市住宿交通`，正文没有写自驾或停车，
+ * 但它的 `chunk.keywords.transport` 是 `["停车", "自驾"]`，那么命中来自：
+ * - 标题/正文：`甲城市`、`交通`
+ * - chunk keywords：`停车`、`自驾`
+ * 共 4 个词，分数是 `4 / min(12, 6) = 0.6667`；命中 6 个及以上会封顶为 1。
  */
 function keywordScore(chunk, terms, theme) {
   if (!terms.length) return 0;
