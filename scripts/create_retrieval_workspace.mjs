@@ -14,8 +14,8 @@ function parseArgs(argv) {
     out: "retrieval-workspace.json",
     placeTopK: 5,
     cityTopK: 4,
-    maxPlaceChunks: 20,
-    maxCityChunks: 16,
+    maxPlaceChunks: 45,
+    maxCityChunks: 24,
     embeddingUrl: "",
     embeddingModel: "",
     noEmbedding: false,
@@ -141,7 +141,7 @@ function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResul
  * 对单个景点或城市运行所有默认主题检索，并收集主题结果和去重 chunk_id。
  *
  * 收集顺序等于 PLACE_THEMES / CITY_THEMES 的对象 key 顺序：
- * place 为 highlights -> drawbacks -> tickets -> transport -> routes -> safety；
+ * place 为 highlights -> drawbacks -> tickets -> transport -> routes -> crowds -> accessibility -> facilities -> safety；
  * city 为 foods -> lodging -> transport -> backup_places -> notes。
  *
  * 每个 theme 会单独调用 retrieve()，先在该 theme 内排序并取 topK。
@@ -272,8 +272,8 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
   const index = loadRagIndex(ragIndexPath);
   const placeTopK = Number(options.placeTopK ?? 5);
   const cityTopK = Number(options.cityTopK ?? 4);
-  const maxPlaceChunks = Number(options.maxPlaceChunks ?? 20);
-  const maxCityChunks = Number(options.maxCityChunks ?? 16);
+  const maxPlaceChunks = Number(options.maxPlaceChunks ?? 45);
+  const maxCityChunks = Number(options.maxCityChunks ?? 24);
   const hasChunkEmbeddings = asList(index.chunks).some((chunk) => asList(chunk.embedding).length > 0);
   const usesEmbedding = hasChunkEmbeddings && !options.noEmbedding;
 
