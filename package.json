@@ -12,6 +12,7 @@
     "apply-facts-patch": "node scripts/apply_facts_patch.mjs",
     "validate-digest": "node scripts/validate_source_digest.mjs",
     "apply-digest": "node scripts/apply_source_digest_to_facts.mjs",
+    "rag:validate": "node scripts/validate_rag_index.mjs",
     "rag:retrieve": "node scripts/rag_retrieve.mjs",
     "rag:workspace": "node scripts/create_retrieval_workspace.mjs",
     "render": "node scripts/render_travel_html.mjs",

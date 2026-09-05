@@ -19,10 +19,14 @@ metadata:
 
 RAG 检索使用真实 embedding API。运行 `create_retrieval_workspace.mjs` 或 `rag_retrieve.mjs` 前，如果 `rag-index.json` 的 chunks 含有 `embedding` 向量，先确认 embedding 配置：优先使用当前 shell 环境中的 `RAG_EMBEDDING_URL`、`RAG_EMBEDDING_MODEL`；`RAG_EMBEDDING_URL` 未设置时脚本默认使用 `http://localhost:11434/api/embed`；`RAG_EMBEDDING_MODEL` 未设置时脚本会回退到 `rag-index.json` 的 `embedding.model`。如果环境变量和索引里都没有 model，先询问用户模型名，或在用户同意时使用 `--no-embedding` 临时关闭向量排序。不要把 API key 写入 skill、reference 或项目文件；需要 key 时只通过环境变量传入。
 
+如果 embedding URL 是 `localhost`、`127.0.0.1` 或 `::1`，不要先在受限沙箱里试跑检索脚本；这类地址通常指向执行环境自身，可能访问不到用户宿主机上的 Ollama 服务。应在第一次运行 `create_retrieval_workspace.mjs` / `rag_retrieve.mjs` 时就请求在可访问本机 loopback 端口的执行环境里运行，并在说明中明确这是为了访问用户本地 embedding API。只有用户拒绝授权、或本地端点在可访问环境里仍失败时，才考虑 `--no-embedding` 降级或让用户检查 Ollama 服务。
+
+`rag-index.json` 体量很大，只能作为项目脚本的输入使用。Agent 不得用 `cat`、`sed`、`head`、`jq`、临时 `node -e` / Python 脚本或编辑器自行打开、抽样、检索、统计或读取其中的 `chunks`、`text`、`embedding` 等内容；也不得把它作为事实来源直接阅读。需要校验时运行 `scripts/validate_rag_index.mjs`，需要召回时运行 `scripts/create_retrieval_workspace.mjs` 或 `scripts/rag_retrieve.mjs`，之后只阅读这些脚本生成的轻量工作区和召回结果。
+
 RAG 流程先跑到第一版 `facts-workspace.json`：
 
 1. 读取用户路线，按 [references/info-rules.md](references/info-rules.md)、[references/data-contracts.md](references/data-contracts.md) 和 [references/rag-data-contracts.md](references/rag-data-contracts.md) 人工创建 `route-structure.json`。
-2. 用脚本校验 `rag-index.json` 可解析和必要字段完整；不要为了“看一眼”而直接打印或预览完整索引。后续脚本失败时停止当前流程，并把失败原因告诉用户。如果后续需要本地照片，使用 `rag-index.resource_root/photos`；若 `resource_root` 不存在或不可读，只影响照片归属，不进入原材料回读流程。
+2. 用 `scripts/validate_rag_index.mjs <rag-index.json>` 校验索引可解析和必要字段完整；不要自行读取、抽样、统计、打印或预览完整索引。后续脚本失败时停止当前流程，并把失败原因告诉用户。如果后续需要本地照片，使用脚本从 `rag-index.resource_root/photos` 归属照片；若 `resource_root` 不存在或不可读，只影响照片归属，不进入原材料回读流程。
 3. 运行 `create_fact_workspace.mjs --rag-index` 创建带 schema 和路线骨架的 skeleton `facts-workspace.json`。
 4. 运行 `create_retrieval_workspace.mjs`，基于 `facts-workspace.json` 和 `rag-index.json` 批量创建 `retrieval-workspace.json`。需要检查召回原因时追加 `--log <工作目录>/retrieval-log.json`；该日志记录每个 target/theme 下所有 chunk 的 entity gate、召回状态、向量余弦相似度、分项得分权重和贡献。
 5. Agent 读取 `retrieval-workspace.json`，按景点、城市和主题整理 facts patch，再用 `apply_facts_patch.mjs` 合并到第一版 `facts-workspace.json`；此时 `needs_agent_review` 仍保持 `true`，等待后续字段级 checklist、补检索、缺口处理或渲染前评估。
@@ -47,7 +51,7 @@ RAG happy path 中不要创建 `resource-index.json`、`reading-queue.json`、`s
 
 ### RAG 流程
 
-选择 RAG 分支时，在创建或读取 `rag-index.json`、`facts-workspace.json` 或 `retrieval-workspace.json` 前，必须读取 [references/data-contracts.md](references/data-contracts.md)、[references/rag-data-contracts.md](references/rag-data-contracts.md)、[references/rag-facts-framework.md](references/rag-facts-framework.md) 和 [references/rag-workflow.md](references/rag-workflow.md)。RAG 第 1 步仍按 [references/structured-generation-workflow.md](references/structured-generation-workflow.md) 的路线解析规则执行，但不要生成 `resource-index.json`，也不要进入结构化流程的 `reading-queue.json` / `source-digest.json` 主路径。
+选择 RAG 分支时，在创建 `facts-workspace.json` 或读取 `retrieval-workspace.json` 前，必须读取 [references/data-contracts.md](references/data-contracts.md)、[references/rag-data-contracts.md](references/rag-data-contracts.md)、[references/rag-facts-framework.md](references/rag-facts-framework.md) 和 [references/rag-workflow.md](references/rag-workflow.md)。不要由 agent 读取 `rag-index.json` 本体；它只能传给项目脚本。RAG 第 1 步仍按 [references/structured-generation-workflow.md](references/structured-generation-workflow.md) 的路线解析规则执行，但不要生成 `resource-index.json`，也不要进入结构化流程的 `reading-queue.json` / `source-digest.json` 主路径。
 
 ### 结构化流程
 

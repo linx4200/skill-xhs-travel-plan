@@ -35,13 +35,19 @@ RAG 介入 facts 生成的总体设计见 [rag-facts-framework.md](rag-facts-fra
 
 ## Step 2：校验 RAG Index
 
-用脚本读取并校验 `rag-index.json`，不要直接打印或预览完整索引：
+`rag-index.json` 体量很大，只能作为项目脚本输入。Agent 不得用 `cat`、`sed`、`head`、`jq`、临时 `node -e` / Python 脚本或编辑器自行打开、抽样、检索、统计或读取其中的 `chunks`、`text`、`embedding` 等内容；也不得把它作为事实来源直接阅读。
+
+用固定脚本读取并校验 `rag-index.json`，不要直接打印或预览完整索引：
+
+```bash
+node scripts/validate_rag_index.mjs <rag-index.json>
+```
 
 - 顶层应能解析为 JSON 或 JSONL。
 - chunk 应包含可用于检索的 `chunk_id`、`source_uri`、`title`、`text`、`candidate_places` 和 `candidate_cities`。
 - 如果需要渲染本地照片，`resource_root` 应指向可读资源目录，且照片应位于 `photos/` 下。
 
-如果 `rag-index.json` 与用户描述不符，让后续工作区脚本自然失败并停止流程，向用户报告脚本错误即可。命令输出只保留统计、错误和少量标题级摘要；不要把 `chunks[].text` 或 `embedding` 打印到对话上下文。
+如果 `rag-index.json` 与用户描述不符，让后续工作区脚本自然失败并停止流程，向用户报告脚本错误即可。命令输出只保留统计和错误；不要把 `chunks[].text`、chunk 标题列表或 `embedding` 打印到对话上下文。
 
 RAG 主流程不生成 `resource-index.json`。`facts-workspace.json` 的地点/城市来源线索来自 RAG chunks 的 `source_uri`，照片归属由 `create_fact_workspace.mjs --rag-index` 直接扫描 `resource_root/photos` 得到。
 
@@ -69,6 +75,8 @@ node scripts/create_retrieval_workspace.mjs \
   -o <工作目录>/retrieval-workspace.json \
   --log <工作目录>/retrieval-log.json
 ```
+
+如果 embedding URL 是 `localhost`、`127.0.0.1` 或 `::1`，第一次运行本命令时就应使用可访问用户宿主机 loopback 端口的执行环境。不要先在受限沙箱内试跑后再重试；这会浪费一次失败，并可能误判为 Ollama 不可用。只有可访问环境中的请求仍失败，或用户拒绝授权访问本地端口时，才使用 `--no-embedding` 降级。
 
 `retrieval-workspace.json` 应包含：
 

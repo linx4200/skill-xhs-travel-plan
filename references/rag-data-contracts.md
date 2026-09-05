@@ -6,6 +6,8 @@
 
 `rag-index.json` 由上游 RAG 索引生成流程提供，当前 skill 直接消费，不在主流程中重新扫描原始文本材料。
 
+`rag-index.json` 只能由项目脚本读取。Agent 不得直接打开、抽样、检索、统计或阅读该文件内容；需要校验时调用 `scripts/validate_rag_index.mjs`，需要召回时调用 `scripts/create_retrieval_workspace.mjs` 或 `scripts/rag_retrieve.mjs`。Agent 的事实判断只能基于脚本生成的 `retrieval-workspace.json`、定向检索结果和必要的召回日志摘要进行。
+
 支持两种输入：
 
 - JSON：顶层包含 `chunks` 数组。
