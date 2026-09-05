@@ -68,7 +68,7 @@ const index = {
 };
 
 test("place retrieval only returns chunks that match candidate_places", async () => {
-  const result = await retrieve(index, { place: "A地方", theme: "safety", topK: 10, maxChunks: 10, includeDiagnostics: true });
+  const result = await retrieve(index, { place: "A地方", theme: "safety", topK: 10, includeDiagnostics: true });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["a-place-safety"],
@@ -85,7 +85,7 @@ test("place retrieval only returns chunks that match candidate_places", async ()
 });
 
 test("query-only retrieval can still use keyword matches without candidate entities", async () => {
-  const result = await retrieve(index, { query: "安全", topK: 10, maxChunks: 10 });
+  const result = await retrieve(index, { query: "安全", topK: 10 });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["a-place-safety", "b-place-safety", "general-safety"],
@@ -94,7 +94,7 @@ test("query-only retrieval can still use keyword matches without candidate entit
 });
 
 test("city retrieval prefers city-level chunks without candidate_places", async () => {
-  const result = await retrieve(index, { city: "甲城市", theme: "transport", topK: 10, maxChunks: 10 });
+  const result = await retrieve(index, { city: "甲城市", theme: "transport", topK: 10 });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["city-lodging", "a-text-only", "a-place-safety", "b-place-safety"],
@@ -102,7 +102,7 @@ test("city retrieval prefers city-level chunks without candidate_places", async 
 });
 
 test("city retrieval does not fall back to title or text city matches without candidate_cities", async () => {
-  const result = await retrieve(index, { city: "乙城市", theme: "lodging", topK: 10, maxChunks: 10 });
+  const result = await retrieve(index, { city: "乙城市", theme: "lodging", topK: 10 });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["other-city-lodging"],
@@ -145,7 +145,7 @@ test("query matching only uses title and text", async () => {
     ],
   };
 
-  const result = await retrieve(themeIndex, { query: "门票", topK: 10, maxChunks: 10 });
+  const result = await retrieve(themeIndex, { query: "门票", topK: 10 });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["text-hit"],
@@ -180,7 +180,7 @@ test("video chunks receive a negative score contribution", async () => {
     ],
   };
 
-  const result = await retrieve(videoIndex, { query: "门票", topK: 10, maxChunks: 10, includeDiagnostics: true });
+  const result = await retrieve(videoIndex, { query: "门票", topK: 10, includeDiagnostics: true });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["plain-note", "video-note"],
@@ -221,7 +221,6 @@ test("query embedding similarity participates in ranking when chunk embeddings e
   const result = await retrieve(vectorIndex, {
     query: "徒步",
     topK: 10,
-    maxChunks: 10,
     embeddingClient: async () => ({ embeddings: [[1, 0, 0]] }),
     includeDiagnostics: true,
   });

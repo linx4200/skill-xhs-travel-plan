@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /**
  * RAG 单点检索脚本主流程：
  * 1. 解析 CLI 参数，确定索引路径、检索对象（景点/城市/自由 query）、主题、返回数量、embedding 和日志配置。
@@ -16,9 +17,10 @@
  *    5.3 根据是否有 query 向量、是否有实体目标选择评分权重，并计算综合总分。
  *    5.4 过滤掉未通过 gate 或总分为 0 的 chunk，得到候选结果。
  *    5.5 城市检索优先排列城市级 chunk，然后按总分、命中信号数量和稳定字段排序。
- *    5.6 按 min(topK, maxChunks) 截断，生成最终返回的 results。
+ *    5.6 按 topK 截断，生成最终返回的 results。
  * 6. 按参数输出 JSON 或终端短预览；如指定 `--log`，额外写出可解释的召回与评分诊断日志。
  */
+
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,8 +41,7 @@ function parseArgs(argv) {
     city: "",
     query: "",
     themes: [],
-    topK: RAG_RETRIEVAL_DEFAULTS.singleTopK,
-    maxChunks: RAG_RETRIEVAL_DEFAULTS.singleMaxChunks,
+    topK: RAG_RETRIEVAL_DEFAULTS.ragRetrieveResultChunks,
     embeddingUrl: "",
     embeddingModel: "",
     noEmbedding: false,
@@ -56,7 +57,6 @@ function parseArgs(argv) {
     else if (arg === "--query") args.query = argv[++i];
     else if (arg === "--theme") args.themes.push(argv[++i]);
     else if (arg === "--top-k") args.topK = Number(argv[++i]);
-    else if (arg === "--max-chunks") args.maxChunks = Number(argv[++i]);
     else if (arg === "--embedding-url") args.embeddingUrl = argv[++i];
     else if (arg === "--embedding-model") args.embeddingModel = argv[++i];
     else if (arg === "--no-embedding") args.noEmbedding = true;
@@ -71,7 +71,6 @@ function parseArgs(argv) {
   }
   if (args.place && args.city) throw new Error("Use either --place or --city for entity retrieval, not both.");
   if (!Number.isFinite(args.topK) || args.topK <= 0) throw new Error("--top-k must be a positive number.");
-  if (!Number.isFinite(args.maxChunks) || args.maxChunks <= 0) throw new Error("--max-chunks must be a positive number.");
   return args;
 }
 
@@ -644,7 +643,7 @@ function diagnosticForRow(row, selectedIds, eligibleRanks) {
 /**
  * 流程 6：生成单次 retrieve() 的完整调试日志。
  */
-function retrievalDiagnostics({ index, query, entity, theme, aliases, terms, queryVector, topK, maxChunks, limit, rows, selectedRows, rankedRows }) {
+function retrievalDiagnostics({ index, query, entity, theme, aliases, terms, queryVector, topK, rows, selectedRows, rankedRows }) {
   const selectedIds = new Set(selectedRows.map((row) => row.chunk.chunk_id));
   const eligibleRanks = new Map(rankedRows.map((row, index) => [row.chunk.chunk_id, index + 1]));
   return {
@@ -654,8 +653,6 @@ function retrievalDiagnostics({ index, query, entity, theme, aliases, terms, que
     terms,
     aliases,
     top_k: topK,
-    max_chunks: maxChunks,
-    returned_limit: limit,
     index_chunk_count: asList(index.chunks).length,
     query_embedding: {
       used: queryVector.length > 0,
@@ -697,11 +694,7 @@ export async function retrieve(indexOrPath, options = {}) {
   const query = uniqueStrings([entity?.name, ...themeTerms(entity?.type, theme), options.query]).join(" ");
   // 这里的 embedding API 只负责把本次 query 转成向量，不负责从索引里返回最相似的 chunk。
   const queryVector = await queryEmbedding(index, query, options);
-  const topK = Number(options.topK ?? RAG_RETRIEVAL_DEFAULTS.singleTopK);
-  const maxChunks = Number(options.maxChunks ?? RAG_RETRIEVAL_DEFAULTS.singleMaxChunks);
-  // 单次 theme 检索最多返回 min(topK, maxChunks) 条。
-  // 因此当 topK > maxChunks 时，超出的 K 不会增加该 theme 的候选结果。
-  const limit = Math.min(topK, maxChunks);
+  const topK = Number(options.topK ?? RAG_RETRIEVAL_DEFAULTS.ragRetrieveResultChunks);
 
   // 本脚本没有接入向量数据库或 kNN 检索服务，因此仍需遍历本地 index.chunks。
   // 普通检索会先跳过未通过 entity gate 的 chunk，避免给明显不相关的材料计算 embedding 相似度；
@@ -727,7 +720,7 @@ export async function retrieve(indexOrPath, options = {}) {
   const rankedRows = rows
     .filter((row) => row.gate.passed && row.result.score > 0)
     .sort((left, right) => compareResultsForEntity(left.result, right.result, entity));
-  const selectedRows = rankedRows.slice(0, limit);
+  const selectedRows = rankedRows.slice(0, topK);
   const results = selectedRows.map((row) => row.result);
 
   const output = {
@@ -746,8 +739,6 @@ export async function retrieve(indexOrPath, options = {}) {
       terms,
       queryVector,
       topK,
-      maxChunks,
-      limit,
       rows,
       selectedRows,
       rankedRows,
@@ -783,7 +774,6 @@ async function main() {
         query: args.query,
         theme,
         topK: args.topK,
-        maxChunks: args.maxChunks,
         embeddingUrl: args.embeddingUrl,
         embeddingModel: args.embeddingModel,
         noEmbedding: args.noEmbedding,

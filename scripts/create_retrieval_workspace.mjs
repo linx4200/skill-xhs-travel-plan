@@ -145,15 +145,15 @@ function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResul
  * place 为 highlights -> drawbacks -> tickets -> transport -> routes -> crowds -> accessibility -> facilities -> safety；
  * city 为 foods -> lodging -> transport -> backup_places -> notes。
  *
- * 每个 theme 会单独调用 retrieve()，先在该 theme 内排序并取 topK。
+ * 每个 theme 会单独调用 retrieve()，先在该 theme 内排序并取 maxThemeChunks。
  * 然后这里按 theme 顺序把结果加入 unique_chunk_ids，并用 selectedIdSet 跨 theme 去重。
  * unique_chunk_ids 到 maxChunks 后，后续 theme 的新 chunk 不再进入阅读池；
  * 但后续 theme 命中已入池的 chunk 时，仍会保留在 themes.<theme>[] 索引里。
  *
  * 这里不是把所有 theme 的候选合并后全局排序取 N。
- * 当 topK > maxChunks 时，前面的 theme 可能直接占满 N 个名额，后面的 theme 很难贡献新 chunk。
+ * 当 maxThemeChunks > maxChunks 时，前面的 theme 可能直接占满 N 个名额，后面的 theme 很难贡献新 chunk。
  */
-async function collectThemeResults(index, entityType, name, themes, topK, maxChunks, options = {}) {
+async function collectThemeResults(index, entityType, name, themes, maxThemeChunks, maxChunks, options = {}) {
   const themeResults = {};
   const selectedIds = [];
   const selectedIdSet = new Set();
@@ -163,8 +163,7 @@ async function collectThemeResults(index, entityType, name, themes, topK, maxChu
     const result = await retrieve(index, {
       [entityType]: name,
       theme,
-      topK,
-      maxChunks,
+      topK: maxThemeChunks,
       embeddingUrl: options.embeddingUrl,
       embeddingModel: options.embeddingModel,
       noEmbedding: options.noEmbedding,
@@ -179,7 +178,7 @@ async function collectThemeResults(index, entityType, name, themes, topK, maxChu
       });
     }
     const kept = [];
-    for (const item of result.results.slice(0, topK)) {
+    for (const item of result.results.slice(0, maxThemeChunks)) {
       if (!selectedIdSet.has(item.chunk_id)) {
         if (selectedIds.length >= maxChunks) continue;
         selectedIdSet.add(item.chunk_id);
