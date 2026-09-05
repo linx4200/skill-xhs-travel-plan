@@ -72,8 +72,7 @@ node scripts/create_fact_workspace.mjs \
 node scripts/create_retrieval_workspace.mjs \
   --facts <工作目录>/facts-workspace.json \
   --rag-index <rag-index.json> \
-  -o <工作目录>/retrieval-workspace.json \
-  --log <工作目录>/retrieval-log.json
+  -o <工作目录>/retrieval-workspace.json
 ```
 
 如果 embedding URL 是 `localhost`、`127.0.0.1` 或 `::1`，第一次运行本命令时就应使用可访问用户宿主机 loopback 端口的执行环境。不要先在受限沙箱内试跑后再重试；这会浪费一次失败，并可能误判为 Ollama 不可用。只有可访问环境中的请求仍失败，或用户拒绝授权访问本地端口时，才使用 `--no-embedding` 降级。
@@ -85,7 +84,7 @@ node scripts/create_retrieval_workspace.mjs \
 - `cities.<城市名>.target`、`unique_chunk_ids`、`retrieval_health` 和 `themes`。
 - `summary.attention_places`、`summary.attention_cities`、`summary.gap_places` 和 `summary.gap_cities`。
 
-`--log` 是可选调试输出。`retrieval-log.json` 按每个 target/theme 记录全量 chunk 评估，包括 entity gate 是否通过、召回状态、candidate rank、selected rank、向量余弦相似度、评分信号、权重和分项贡献。日志不复制完整 embedding 数组；用 `vector_match.cosine_similarity` 和向量维度检查向量匹配。
+默认不生成 `retrieval-log.json`。只有用户明确要求 RAG 召回日志、检索日志或召回原因诊断时，才追加 `--log <工作目录>/retrieval-log.json`。`retrieval-log.json` 按每个 target/theme 记录全量 chunk 评估，包括 entity gate 是否通过、召回状态、candidate rank、selected rank、向量余弦相似度、评分信号、权重和分项贡献。日志不复制完整 embedding 数组；用 `vector_match.cosine_similarity` 和向量维度检查向量匹配。
 
 ## Step 5：填充第一版 Facts Workspace
 
@@ -103,7 +102,7 @@ Agent 读取 `retrieval-workspace.json` 后填充 `facts-workspace.json`：
 
 ## 缺口处理边界
 
-RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`；召回调试信息按需写入 `retrieval-log.json`。
+RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json`、`read-log.json` 或 `retrieval-log.json`；只有用户明确要求时才写入召回调试日志。
 
 以下情况不应继续无限 RAG 检索，应在后续步骤中转为定向补检索，或明确写入“材料未说明 / 出行前确认”：
 

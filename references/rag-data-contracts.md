@@ -6,7 +6,7 @@
 
 `rag-index.json` 由上游 RAG 索引生成流程提供，当前 skill 直接消费，不在主流程中重新扫描原始文本材料。
 
-`rag-index.json` 只能由项目脚本读取。Agent 不得直接打开、抽样、检索、统计或阅读该文件内容；需要校验时调用 `scripts/validate_rag_index.mjs`，需要召回时调用 `scripts/create_retrieval_workspace.mjs` 或 `scripts/rag_retrieve.mjs`。Agent 的事实判断只能基于脚本生成的 `retrieval-workspace.json`、定向检索结果和必要的召回日志摘要进行。
+`rag-index.json` 只能由项目脚本读取。Agent 不得直接打开、抽样、检索、统计或阅读该文件内容；需要校验时调用 `scripts/validate_rag_index.mjs`，需要召回时调用 `scripts/create_retrieval_workspace.mjs` 或 `scripts/rag_retrieve.mjs`。Agent 的事实判断只能基于脚本生成的 `retrieval-workspace.json`、定向检索结果和用户明确要求生成的召回日志摘要进行。
 
 支持两种输入：
 
@@ -81,7 +81,7 @@ RAG 分支填 facts 时，agent 应按 `unique_chunk_ids` 到顶层 `chunks_by_i
 
 ## retrieval-log.json
 
-`retrieval-log.json` 是可选调试产物，由 `rag_retrieve.mjs --log` 或 `create_retrieval_workspace.mjs --log` 生成。它解释每个 chunk 如何被召回、是否被过滤、向量相似度如何参与排序，以及总分如何由各分项贡献组成。该文件面向调试和调参，不作为 facts 填充的事实来源。
+`retrieval-log.json` 是用户明确要求时才生成的可选调试产物，由 `rag_retrieve.mjs --log` 或 `create_retrieval_workspace.mjs --log` 生成。默认 RAG 流程不得创建该文件。它解释每个 chunk 如何被召回、是否被过滤、向量相似度如何参与排序，以及总分如何由各分项贡献组成。该文件面向调试和调参，不作为 facts 填充的事实来源。
 
 顶层字段：
 
@@ -123,4 +123,4 @@ RAG 分支填 facts 时，agent 应按 `unique_chunk_ids` 到顶层 `chunks_by_i
 - `places.*.source_files` 和 `cities.*.source_files` 来自命中 chunk 的 `source_uri` / `path`，只作为内部来源线索和调试口径，不表示必须回读原始文本。
 - `photos` 由 `create_fact_workspace.mjs --rag-index` 直接扫描 `rag-index.resource_root/photos` 后按地点名或别名归属。
 
-RAG-only happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`；检索调试只按需创建 `retrieval-log.json`。
+RAG-only happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json`、`read-log.json` 或 `retrieval-log.json`；只有用户明确要求时才创建检索调试日志。

@@ -28,12 +28,12 @@ RAG 流程先跑到第一版 `facts-workspace.json`：
 1. 读取用户路线，按 [references/info-rules.md](references/info-rules.md)、[references/data-contracts.md](references/data-contracts.md) 和 [references/rag-data-contracts.md](references/rag-data-contracts.md) 人工创建 `route-structure.json`。
 2. 用 `scripts/validate_rag_index.mjs <rag-index.json>` 校验索引可解析和必要字段完整；不要自行读取、抽样、统计、打印或预览完整索引。后续脚本失败时停止当前流程，并把失败原因告诉用户。如果后续需要本地照片，使用脚本从 `rag-index.resource_root/photos` 归属照片；若 `resource_root` 不存在或不可读，只影响照片归属，不进入原材料回读流程。
 3. 运行 `create_fact_workspace.mjs --rag-index` 创建带 schema 和路线骨架的 skeleton `facts-workspace.json`。
-4. 运行 `create_retrieval_workspace.mjs`，基于 `facts-workspace.json` 和 `rag-index.json` 批量创建 `retrieval-workspace.json`。需要检查召回原因时追加 `--log <工作目录>/retrieval-log.json`；该日志记录每个 target/theme 下所有 chunk 的 entity gate、召回状态、向量余弦相似度、分项得分权重和贡献。
+4. 运行 `create_retrieval_workspace.mjs`，基于 `facts-workspace.json` 和 `rag-index.json` 批量创建 `retrieval-workspace.json`。默认不要传 `--log`，也不要创建 `retrieval-log.json`；只有用户明确要求 RAG 召回日志、检索日志或召回原因诊断时，才追加 `--log <工作目录>/retrieval-log.json`。
 5. Agent 读取 `retrieval-workspace.json`，按景点、城市和主题整理 facts patch，再用 `apply_facts_patch.mjs` 合并到第一版 `facts-workspace.json`；此时 `needs_agent_review` 仍保持 `true`，等待后续字段级 checklist、补检索、缺口处理或渲染前评估。
 
 RAG 分支的第 1 步复用结构化流程的路线解析规则；不生成 `resource-index.json`。第 3 步复用事实工作区骨架脚本，但输入改为 `rag-index.json`；第 4、5 步按 [references/rag-facts-framework.md](references/rag-facts-framework.md) 和 [references/rag-workflow.md](references/rag-workflow.md) 执行。
 
-RAG happy path 中不要创建 `resource-index.json`、`reading-queue.json`、`source-digest.json` 或 `read-log.json`；检索调试只按需写入 `retrieval-log.json`。若用户明确不做原材料回读，则后续缺口只通过 facts checklist、定向 RAG 或“材料未说明 / 出行前确认”处理。
+RAG happy path 中不要创建 `resource-index.json`、`reading-queue.json`、`source-digest.json`、`read-log.json` 或 `retrieval-log.json`；只有用户明确要求 RAG 召回日志、检索日志或召回原因诊断时，才写入 `retrieval-log.json`。若用户明确不做原材料回读，则后续缺口只通过 facts checklist、定向 RAG 或“材料未说明 / 出行前确认”处理。
 
 ### 分支 B：结构化流程
 
