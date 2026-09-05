@@ -387,7 +387,7 @@ unresolved high-risk fields or conflicts
     // 本次检索使用的 RAG index。
     "rag_index": "rag-index.json",
 
-    // 可选：传入 --log 时记录 retrieval-log.json 路径。
+    // 仅当用户明确要求 RAG 召回日志并传入 --log 时，记录 retrieval-log.json 路径。
     "retrieval_log": "retrieval-log.json"
   },
 
@@ -782,7 +782,7 @@ unresolved high-risk fields or conflicts
 - 缓解城市名泛匹配导致的素材范围过宽问题，优先保留真正服务城市级吃住行、风险和备选点判断的 chunks。
 - 对长评论文件、多地点混合文件或后续更细 chunk 粒度的素材，只让 agent 阅读相关 chunk，而不是整份原文。
 - 通过 `themes` 索引把 chunks 映射到 `highlights`、`tickets`、`transport` 等字段，减少 agent 读完原文后再自行分类的成本。
-- 需要调试召回质量时，通过 `retrieval-log.json` 查看每个 chunk 的 entity gate、向量余弦相似度、召回状态和 score 分项贡献。
+- 用户明确要求调试召回质量时，通过 `retrieval-log.json` 查看每个 chunk 的 entity gate、向量余弦相似度、召回状态和 score 分项贡献；默认流程不生成该日志。
 - 在后续局部修改中，直接从目标地点/城市和目标 theme 定位到少量 chunks，减少重新阅读全局读取队列的需要。
 
 RAG 不应被表述为默认比 `reading-queue.json` 更省。若 chunk 粒度仍是一篇 note，且 `retrieval-workspace.json` 实际包含了大量 note 原文，初次完整生成的 token 节省可能有限。收益成立的前提是：先批量生成受 topK 和去重约束的 `retrieval-workspace.json`，agent 按 target 的 `unique_chunk_ids` 局部读取顶层 `chunks_by_id`，再按 checklist 做少量缺口补检索，而不是把全部 retrieval workspace 原文一次性读入上下文。
