@@ -2,7 +2,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CITY_THEMES, PLACE_THEMES, loadRagIndex, retrieve, writeRetrievalLog } from "./rag_retrieve.mjs";
+import { loadRagIndex, retrieve, writeRetrievalLog } from "./rag_retrieve.mjs";
+import { CITY_THEMES, PLACE_THEMES, RAG_RETRIEVAL_DEFAULTS } from "./rag_retrieval_config.mjs";
 
 /**
  * 解析批量检索命令参数，读取 facts workspace、RAG index 和输出路径。
@@ -12,10 +13,10 @@ function parseArgs(argv) {
     facts: "",
     ragIndex: "",
     out: "retrieval-workspace.json",
-    placeTopK: 5,
-    cityTopK: 4,
-    maxPlaceChunks: 45,
-    maxCityChunks: 24,
+    placeTopK: RAG_RETRIEVAL_DEFAULTS.placeMaxThemeChunks,
+    cityTopK: RAG_RETRIEVAL_DEFAULTS.cityMaxThemeChunks,
+    maxPlaceChunks: RAG_RETRIEVAL_DEFAULTS.maxPlaceChunks,
+    maxCityChunks: RAG_RETRIEVAL_DEFAULTS.maxCityChunks,
     embeddingUrl: "",
     embeddingModel: "",
     noEmbedding: false,
@@ -117,7 +118,8 @@ function chunkRecord(result) {
 function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResults) {
   const warnings = [];
   const hardGapReasons = [];
-  const minimum = targetType === "city" ? 2 : 3;
+  const minimum =
+    targetType === "city" ? RAG_RETRIEVAL_DEFAULTS.minHealthyCityChunks : RAG_RETRIEVAL_DEFAULTS.minHealthyPlaceChunks;
   if (uniqueChunkIds.length === 0) hardGapReasons.push("no_retrieved_chunks");
   else if (uniqueChunkIds.length < minimum) warnings.push(`retrieved_note_chunks_below_${minimum}:${uniqueChunkIds.length}`);
   for (const [theme, results] of Object.entries(themeResults)) {
@@ -269,10 +271,10 @@ function retrievalLogDocument(workspace, requests) {
 export async function createRetrievalWorkspace(factsPath, ragIndexPath, options = {}) {
   const facts = readJson(factsPath);
   const index = loadRagIndex(ragIndexPath);
-  const placeTopK = Number(options.placeTopK ?? 5);
-  const cityTopK = Number(options.cityTopK ?? 4);
-  const maxPlaceChunks = Number(options.maxPlaceChunks ?? 45);
-  const maxCityChunks = Number(options.maxCityChunks ?? 24);
+  const placeMaxThemeChunks = Number(options.placeTopK ?? RAG_RETRIEVAL_DEFAULTS.placeMaxThemeChunks);
+  const cityMaxThemeChunks = Number(options.cityTopK ?? RAG_RETRIEVAL_DEFAULTS.cityMaxThemeChunks);
+  const maxPlaceChunks = Number(options.maxPlaceChunks ?? RAG_RETRIEVAL_DEFAULTS.maxPlaceChunks);
+  const maxCityChunks = Number(options.maxCityChunks ?? RAG_RETRIEVAL_DEFAULTS.maxCityChunks);
   const hasChunkEmbeddings = asList(index.chunks).some((chunk) => asList(chunk.embedding).length > 0);
   const usesEmbedding = hasChunkEmbeddings && !options.noEmbedding;
 
@@ -284,7 +286,7 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
       "place",
       place,
       PLACE_THEMES,
-      placeTopK,
+      placeMaxThemeChunks,
       maxPlaceChunks,
       options,
     );
@@ -304,7 +306,7 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
       "city",
       city,
       CITY_THEMES,
-      cityTopK,
+      cityMaxThemeChunks,
       maxCityChunks,
       options,
     );
@@ -337,8 +339,8 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
     retrieval: {
       place_themes: Object.keys(PLACE_THEMES),
       city_themes: Object.keys(CITY_THEMES),
-      place_top_k: placeTopK,
-      city_top_k: cityTopK,
+      place_top_k: placeMaxThemeChunks,
+      city_top_k: cityMaxThemeChunks,
       max_place_chunks: maxPlaceChunks,
       max_city_chunks: maxCityChunks,
       scoring: {

@@ -399,6 +399,9 @@ unresolved high-risk fields or conflicts
       "tickets",
       "transport",
       "routes",
+      "crowds",
+      "accessibility",
+      "facilities",
       "safety"
     ],
 
@@ -419,10 +422,10 @@ unresolved high-risk fields or conflicts
 
     // 单个景点跨主题去重后的理论上限。
     // 实现上可以先按主题 top_k 收集，再按 unique_chunk_ids 控制阅读量。
-    "max_place_chunks": 20,
+    "max_place_chunks": 45,
 
     // 单个城市跨主题去重后的理论上限。
-    "max_city_chunks": 16,
+    "max_city_chunks": 24,
 
     // 可选：记录检索排序策略，方便后续复现实验。
     "scoring": {

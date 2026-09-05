@@ -23,32 +23,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
+import { CITY_THEMES, PLACE_THEMES, RAG_RETRIEVAL_DEFAULTS } from "./rag_retrieval_config.mjs";
 
-/**
- * 景点级检索主题。每个 theme 对应一组用于关键词召回和排序的中文触发词。
- */
-export const PLACE_THEMES = {
-  highlights: ["看点", "出片", "宝藏", "必去", "值得", "精华", "机位", "推荐"],
-  drawbacks: ["避雷", "避坑", "缺点", "差评", "不推荐", "踩雷", "失望"],
-  tickets: ["门票", "票价", "预约", "开放", "优惠", "套票", "免票", "半价", "购票", "闭园", "营业"],
-  transport: ["停车", "导航", "交通", "路况", "自驾", "塞车", "包车", "打车", "公交", "班车", "接驳", "换乘"],
-  routes: ["路线", "玩法", "游览", "顺序", "入口", "出口", "上山", "下山", "环线", "徒步", "索道", "缆车", "游船", "观光车"],
-  crowds: ["人流", "人少", "人多", "错峰", "排队", "拥挤", "限流", "早去", "晚去", "工作日", "节假日", "旺季"],
-  accessibility: ["老人", "小孩", "亲子", "带娃", "推车", "无障碍", "台阶", "体力"],
-  facilities: ["厕所", "卫生间", "补给", "餐饮", "小卖部", "休息区", "座椅", "寄存", "充电", "游客中心"],
-  safety: ["安全", "注意", "防滑", "风大", "保暖", "防晒", "雨具", "高反", "海拔", "温差", "落石", "封路"],
-};
-
-/**
- * 城市级检索主题。城市主题偏向吃住行、备选点和整体风险提醒。
- */
-export const CITY_THEMES = {
-  foods: ["美食", "餐厅", "小吃", "夜市", "早市", "菜市场", "烧烤", "咖啡", "甜品", "特色菜", "本地人"],
-  lodging: ["住宿", "酒店", "民宿", "客栈", "青旅", "位置", "商圈", "隔音", "性价比"],
-  transport: ["停车", "路况", "导航", "限行", "交通", "自驾", "高铁", "大巴", "包车", "打车", "拼车", "公交"],
-  backup_places: ["备选", "景点", "观景台", "打卡点", "冷门", "小众", "顺路", "附近"],
-  notes: ["风险", "注意", "安全", "贴士", "天气", "海拔", "温差", "高反", "绕路", "限流", "堵车", "物价", "宰客", "预约", "关门"],
-};
+export { CITY_THEMES, PLACE_THEMES };
 
 const VIDEO_CHUNK_PENALTY_WEIGHT = -0.15;
 
@@ -62,8 +39,8 @@ function parseArgs(argv) {
     city: "",
     query: "",
     themes: [],
-    topK: 3,
-    maxChunks: 20,
+    topK: RAG_RETRIEVAL_DEFAULTS.singleTopK,
+    maxChunks: RAG_RETRIEVAL_DEFAULTS.singleMaxChunks,
     embeddingUrl: "",
     embeddingModel: "",
     noEmbedding: false,
@@ -225,7 +202,7 @@ function keywordScore(chunk, terms) {
   for (const term of terms) {
     if (haystack.includes(term)) hits += 1;
   }
-  return Math.min(1, hits / Math.min(terms.length, 6));
+  return Math.min(1, hits / Math.min(terms.length, RAG_RETRIEVAL_DEFAULTS.keywordScoreTermCap));
 }
 
 /**
@@ -720,8 +697,8 @@ export async function retrieve(indexOrPath, options = {}) {
   const query = uniqueStrings([entity?.name, ...themeTerms(entity?.type, theme), options.query]).join(" ");
   // 这里的 embedding API 只负责把本次 query 转成向量，不负责从索引里返回最相似的 chunk。
   const queryVector = await queryEmbedding(index, query, options);
-  const topK = Number(options.topK ?? 5);
-  const maxChunks = Number(options.maxChunks ?? 20);
+  const topK = Number(options.topK ?? RAG_RETRIEVAL_DEFAULTS.singleTopK);
+  const maxChunks = Number(options.maxChunks ?? RAG_RETRIEVAL_DEFAULTS.singleMaxChunks);
   // 单次 theme 检索最多返回 min(topK, maxChunks) 条。
   // 因此当 topK > maxChunks 时，超出的 K 不会增加该 theme 的候选结果。
   const limit = Math.min(topK, maxChunks);
