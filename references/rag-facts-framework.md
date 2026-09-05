@@ -4,7 +4,7 @@
 
 ## 目标
 
-RAG 作为素材读取层，目标是在用户已经提供 `rag-index.json` 的情况下，让 agent 直接阅读被检索命中的 chunks，并提高事实字段定位效率。它不直接替代事实判断，也不自动把检索结果视为最终攻略事实。
+RAG 作为素材读取层，目标是在用户已经提供 `rag-index.json` 的情况下，让 agent 直接阅读脚本产出的检索结果中命中的 chunks，并提高事实字段定位效率。`rag-index.json` 本体只能由项目脚本读取，agent 不得直接打开、抽样、统计、检索或阅读该大文件。RAG 不直接替代事实判断，也不自动把检索结果视为最终攻略事实。
 
 RAG 主流程不再生成 `resource-index.json`、`reading-queue.json` 或 `source-digest.json`。如果用户明确不希望回读原材料，后续缺口只通过字段级 checklist、定向 RAG retrieve、冲突保留或“材料未说明 / 出行前确认”处理。
 
@@ -13,7 +13,7 @@ RAG 主流程不再生成 `resource-index.json`、`reading-queue.json` 或 `sour
 ## 总体流程
 
 1. 创建 `route-structure.json`
-2. 读取并校验 `rag-index.json`
+2. 用项目脚本校验 `rag-index.json`
 3. 基于 `route-structure.json` 和 `rag-index.json` 创建带 schema 和路线骨架的 `facts-workspace.json`
 4. 基于 `facts-workspace.json` 和 `rag-index.json` 批量创建 `retrieval-workspace.json`
 5. 读取 `retrieval-workspace.json`，按景点、城市和主题填充 `facts-workspace.json`
@@ -124,7 +124,7 @@ unresolved high-risk fields or conflicts
 
 阶段 1 继续按 `structured-generation-workflow.md` 和 `info-rules.md` 的既有规则，由 agent 解析用户路线并创建 `route-structure.json`。路线解析边界、真实游玩地点、短停点、城市和住宿/中转点的判断继续沿用现有逻辑。
 
-阶段 2 不再使用 `scan_resources.mjs` 创建 `resource-index.json`。RAG index 已经包含 chunk text、候选地点、候选城市和来源 URI；重复扫描原始素材会增加一个低价值中间文件，并重新引入原材料回读心智负担。不要直接打印或预览完整 RAG index；脚本解析失败时停止流程并报告错误。
+阶段 2 不再使用 `scan_resources.mjs` 创建 `resource-index.json`。RAG index 已经包含 chunk text、候选地点、候选城市和来源 URI；重复扫描原始素材会增加一个低价值中间文件，并重新引入原材料回读心智负担。不要由 agent 直接打印、预览、抽样、统计或读取完整 RAG index；只能把该文件路径传给项目脚本。脚本解析失败时停止流程并报告错误。
 
 阶段 2 需要确认：
 
