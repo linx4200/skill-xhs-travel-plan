@@ -414,10 +414,10 @@ function scoreWeights(hasQueryVector, entity) {
       ? {
           profile: "entity_query_embedding",
           weights: {
-            query_embedding_similarity: 0.55,
+            query_embedding_similarity: 0.6,
             keyword_match: 0.2,
             route_entity_match: 0.15,
-            title_source_match: 0.1,
+            title_source_match: 0.05,
             video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
           },
         }
@@ -425,8 +425,8 @@ function scoreWeights(hasQueryVector, entity) {
           profile: "query_only_embedding",
           weights: {
             query_embedding_similarity: 0.7,
-            keyword_match: 0.2,
-            title_source_match: 0.1,
+            keyword_match: 0.25,
+            title_source_match: 0.05,
             video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
           },
         };
@@ -435,9 +435,9 @@ function scoreWeights(hasQueryVector, entity) {
     ? {
         profile: "entity_query_keyword",
         weights: {
-          keyword_match: 0.45,
+          keyword_match: 0.55,
           route_entity_match: 0.35,
-          title_source_match: 0.2,
+          title_source_match: 0.1,
           video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
         },
       }
