@@ -429,21 +429,37 @@ unresolved high-risk fields or conflicts
 
     // 可选：记录检索排序策略，方便后续复现实验。
     "scoring": {
-      // 当前实现使用 candidate 归属门控 + query embedding 相似度 + 关键词/实体/标题来源排序。
-      "strategy": "candidate_gated_embedding_keyword_entity_title",
+      // 当前实现使用 candidate 归属门控 + query embedding 相似度 + 关键词/实体/标题来源排序；
+      // 城市检索对绑定具体景点的 chunk 使用 theme-sensitive 软惩罚。
+      "strategy": "candidate_gated_embedding_keyword_entity_title_penalty",
 
       // 当前推荐权重。实际以 rag_retrieve.mjs 实现为准。
       "weights": {
-        "entity_query": {
-          "query_embedding_similarity": 0.45,
-          "keyword_match": 0.25,
-          "route_entity_match": 0.2,
-          "title_source_match": 0.1
-        },
-        "query_only": {
-          "query_embedding_similarity": 0.7,
+        "entity_query_embedding": {
+          "query_embedding_similarity": 0.6,
           "keyword_match": 0.2,
-          "title_source_match": 0.1
+          "route_entity_match": 0.15,
+          "title_source_match": 0.05,
+          "video_source_penalty": -0.15,
+          "city_place_specific_penalty": "city theme dependent"
+        },
+        "entity_query_keyword": {
+          "keyword_match": 0.55,
+          "route_entity_match": 0.35,
+          "title_source_match": 0.1,
+          "video_source_penalty": -0.15,
+          "city_place_specific_penalty": "city theme dependent"
+        },
+        "query_only_embedding": {
+          "query_embedding_similarity": 0.7,
+          "keyword_match": 0.25,
+          "title_source_match": 0.05,
+          "video_source_penalty": -0.15
+        },
+        "query_only_keyword": {
+          "keyword_match": 0.8,
+          "title_source_match": 0.2,
+          "video_source_penalty": -0.15
         }
       }
     }
@@ -598,8 +614,8 @@ unresolved high-risk fields or conflicts
         "source_files_count": 12
       },
 
-      // 城市检索通常更泛。Agent 应优先读取 matched_by 包含 candidate_cities
-      // 且内容确实服务本路线的 chunks。
+      // 城市检索通常更泛。Agent 应优先读取 candidate_rank 靠前、
+      // 且内容确实服务本路线的 chunks；地点级城市命中已在评分阶段软降级。
       "unique_chunk_ids": [
         "resources/001-place-a-note.json#note",
         "resources/010-city-a-food.json#note",
@@ -735,7 +751,7 @@ unresolved high-risk fields or conflicts
 城市填充规则：
 
 - 城市固定在所有地点之后处理。原因是城市页是否有独立增量价值，必须先排除已经被地点页、每日页、全局提醒或确认清单吸收的内容。
-- 城市检索只读取 `candidate_cities` 命中目标城市的 chunks，并优先读取没有 `candidate_places` 的城市级 chunks；带具体地点归属的 chunks 只作为城市级材料不足时的补充。
+- 城市检索只读取 `candidate_cities` 命中目标城市的 chunks；绑定具体 `candidate_places` 的地点级城市命中已在评分阶段按 theme 软降级，`backup_places` 不扣分。填充城市 facts 时仍需判断内容是否有独立城市级增量价值。
 - `cities.<城市名>.include` 只有在排除重复后仍满足 `info-rules.md` 的城市 include 标准时才设为 `true`。
 - 城市里的 `backup_places` 只能作为备选信息，不得自动加入每日 `route_places` 或改变用户路线。
 

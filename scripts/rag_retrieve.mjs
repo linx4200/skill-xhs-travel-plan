@@ -13,10 +13,10 @@
  * 4. 在可用时调用 embedding API 生成 query 向量；否则退回到纯关键词、实体和标题来源打分。
  * 5. 对索引中的每个 chunk 逐条召回和排序：
  *    5.1 先执行实体 gate：景点检索要求 candidate_places 匹配，城市检索要求 candidate_cities 匹配。
- *    5.2 对通过 gate 的 chunk 计算标题/正文关键词命中、实体命中、标题/来源命中和 embedding 相似度。
- *    5.3 根据是否有 query 向量、是否有实体目标选择评分权重，并计算综合总分。
+ *    5.2 对通过 gate 的 chunk 计算关键词、实体、标题/来源、embedding、来源惩罚和城市地点级惩罚信号。
+ *    5.3 根据是否有 query 向量、是否有实体目标和城市主题选择评分权重，并计算综合总分。
  *    5.4 过滤掉未通过 gate 或总分为 0 的 chunk，得到候选结果。
- *    5.5 城市检索优先排列城市级 chunk，然后按总分、命中信号数量和稳定字段排序。
+ *    5.5 城市检索把地点级 chunk 作为软 penalty 纳入总分；排序主要看总分，同分时偏向城市级 chunk。
  *    5.6 按 topK 截断，生成最终返回的 results。
  * 6. 按参数输出 JSON 或终端短预览；如指定 `--log`，额外写出可解释的召回与评分诊断日志。
  */
@@ -25,7 +25,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
-import { CITY_THEMES, PLACE_THEMES, RAG_RETRIEVAL_DEFAULTS } from "./rag_retrieval_config.mjs";
+import {
+  CITY_PLACE_SPECIFIC_PENALTY_BY_THEME,
+  CITY_THEMES,
+  DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT,
+  PLACE_THEMES,
+  RAG_RETRIEVAL_DEFAULTS,
+} from "./rag_retrieval_config.mjs";
 
 export { CITY_THEMES, PLACE_THEMES };
 
@@ -406,9 +412,35 @@ function isVideoChunk(chunk) {
 }
 
 /**
- * 流程 5.3：根据是否启用 query embedding 和是否有实体目标选择评分权重。
+ * 流程 5.3：城市检索时，命中城市但绑定具体景点的 chunk 使用软 penalty。
+ *
+ * 城市主题里的 `backup_places` 本来就需要召回景点素材，因此不扣分；未知主题按默认城市
+ * penalty 处理，避免地点级 chunk 在城市级查询中过度占据候选排序。
  */
-function scoreWeights(hasQueryVector, entity) {
+function cityPlaceSpecificPenaltyWeight(entity, theme) {
+  if (entity?.type !== "city") return 0;
+  if (Object.hasOwn(CITY_PLACE_SPECIFIC_PENALTY_BY_THEME, theme)) {
+    return CITY_PLACE_SPECIFIC_PENALTY_BY_THEME[theme];
+  }
+  return DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT;
+}
+
+/**
+ * 流程 5.2：判断城市检索结果是否是绑定具体景点的地点级 chunk。
+ *
+ * `candidate_cities` 仍然负责确认归属；这里只在已归属城市的 chunk 同时存在
+ * `candidate_places` 时记 1，后续通过负权重降低排序分，而不是直接压到城市级 chunk 后面。
+ */
+function cityPlaceSpecificPenaltySignal(chunk, entity) {
+  if (entity?.type !== "city") return 0;
+  return candidateCityMatched(chunk, entity.name) && chunk.candidate_places.length > 0 ? 1 : 0;
+}
+
+/**
+ * 流程 5.3：根据是否启用 query embedding、是否有实体目标和城市主题选择评分权重。
+ */
+function scoreWeights(hasQueryVector, entity, theme) {
+  const cityPlaceSpecificPenalty = cityPlaceSpecificPenaltyWeight(entity, theme);
   if (hasQueryVector) {
     return entity?.name
       ? {
@@ -419,6 +451,7 @@ function scoreWeights(hasQueryVector, entity) {
             route_entity_match: 0.15,
             title_source_match: 0.05,
             video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
+            city_place_specific_penalty: cityPlaceSpecificPenalty,
           },
         }
       : {
@@ -439,6 +472,7 @@ function scoreWeights(hasQueryVector, entity) {
           route_entity_match: 0.35,
           title_source_match: 0.1,
           video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
+          city_place_specific_penalty: cityPlaceSpecificPenalty,
         },
       }
     : {
@@ -491,17 +525,18 @@ function resultForChunk(chunk, score, matches) {
  * 流程 5.2-5.3：综合评分。
  *
  * 评分规则：
- * 1. 先为 chunk 计算五个信号分：
+ * 1. 先为 chunk 计算六个信号分：
  *    - keyword_match：主题词、自由查询词或实体别名命中标题或正文的比例。
  *    - route_entity_match：candidate_places/candidate_cities 或标题、来源、正文中的实体别名命中。
  *    - title_source_match：实体别名是否命中标题、source_uri 或 resource_path。
  *    - query_embedding_similarity：query 向量和 chunk.embedding 的非负余弦相似度。
  *    - video_source_penalty：视频来源 chunk 记为 1，非视频记为 0；该信号使用负权重降低视频素材排序。
- * 2. 再根据是否有 queryVector、是否有实体目标选择权重 profile。
+ *    - city_place_specific_penalty：城市检索下，绑定具体景点的 chunk 记为 1；按 theme 选择负权重软降级。
+ * 2. 再根据是否有 queryVector、是否有实体目标和城市 theme 选择权重 profile。
  * 3. 总分 = 每个信号分 * 对应权重后求和，并通过 scoreBreakdown 保留 contributions 供日志解释。
  * 4. matched_by 只记录参与召回/排序的命中信号；embedding 相似度大于 0 时额外标记 embedding。
  */
-function scoreChunk(chunk, entity, aliases, terms, queryVector) {
+function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
   // 计算 keyword_match：主题词、自由 query 词和实体别名在标题、正文中的命中比例。
   const keyword = keywordScore(chunk, terms);
   // 计算 route_entity_match：优先看结构化 candidate 命中，其次看标题、来源、正文里的实体别名命中。
@@ -512,6 +547,8 @@ function scoreChunk(chunk, entity, aliases, terms, queryVector) {
   const embedding = cosineScore(queryVector, chunk.embedding);
   // 计算 video_source_penalty：视频 chunk 记为 1，后续乘以负权重，降低但不直接剔除。
   const videoPenalty = isVideoChunk(chunk) ? 1 : 0;
+  // 计算 city_place_specific_penalty：城市检索时，绑定具体景点的 chunk 软降级。
+  const cityPlaceSpecificPenalty = cityPlaceSpecificPenaltySignal(chunk, entity);
   // 汇总原始信号分，字段名会和 scoreWeights() 返回的权重名一一对应。
   const signals = {
     query_embedding_similarity: embedding,
@@ -519,9 +556,10 @@ function scoreChunk(chunk, entity, aliases, terms, queryVector) {
     route_entity_match: routeEntity,
     title_source_match: titleSource,
     video_source_penalty: videoPenalty,
+    city_place_specific_penalty: cityPlaceSpecificPenalty,
   };
-  // 按“是否有向量、是否有实体目标”选择权重，并计算各分项贡献与最终总分。
-  const breakdown = scoreBreakdown(signals, scoreWeights(queryVector.length > 0, entity));
+  // 按“是否有向量、是否有实体目标和城市 theme”选择权重，并计算各分项贡献与最终总分。
+  const breakdown = scoreBreakdown(signals, scoreWeights(queryVector.length > 0, entity, theme));
   // 生成 matched_by，供结果和诊断日志解释这个 chunk 是被哪些信号命中的。
   const matches = matchedBy(chunk, entity, aliases, terms);
   // embedding 相似度只要大于 0，就把 embedding 也记录为命中信号。
@@ -576,7 +614,10 @@ function entityGate(chunk, entity) {
 }
 
 /**
- * 流程 5.5：城市检索优先返回没有 candidate_places 的城市级 chunk。
+ * 流程 5.5：判断城市检索同分时是否更偏向城市级 chunk。
+ *
+ * 主排序已经通过 `city_place_specific_penalty` 软降级地点级 chunk；这里仅作为同分
+ * tie-breaker，避免完全相同分数时地点级素材随机压过城市级素材。
  */
 function cityLevelPriority(result, entity) {
   if (entity?.type !== "city") return 0;
@@ -584,22 +625,37 @@ function cityLevelPriority(result, entity) {
 }
 
 /**
- * 流程 5.5：让同分结果稳定排序，避免多次运行产生不必要的 JSON diff。
+ * 流程 5.5：按总分和命中信号数量排序，供通用检索使用。
  */
 function compareResults(left, right) {
   return (
     right.score - left.score ||
-    right.matched_by.length - left.matched_by.length ||
+    right.matched_by.length - left.matched_by.length
+  );
+}
+
+/**
+ * 流程 5.5：稳定排序兜底，避免多次运行产生不必要的 JSON diff。
+ */
+function compareStableFields(left, right) {
+  return (
     left.source_uri.localeCompare(right.source_uri, "zh-CN") ||
     left.chunk_id.localeCompare(right.chunk_id, "zh-CN")
   );
 }
 
 /**
- * 流程 5.5：在城市检索中先排城市级 chunk，再使用通用分数排序。
+ * 流程 5.5：排序候选结果。
+ *
+ * 所有检索都先按总分和命中信号数量排序；城市检索只在这些排序条件相同的时候，
+ * 再偏向没有绑定具体景点的城市级 chunk。
  */
 function compareResultsForEntity(left, right, entity) {
-  return cityLevelPriority(right, entity) - cityLevelPriority(left, entity) || compareResults(left, right);
+  return (
+    compareResults(left, right) ||
+    cityLevelPriority(right, entity) - cityLevelPriority(left, entity) ||
+    compareStableFields(left, right)
+  );
 }
 
 /**
@@ -708,7 +764,7 @@ export async function retrieve(indexOrPath, options = {}) {
     if (!gate.passed && !options.includeDiagnostics) continue;
 
     // 用 queryVector 和每个 chunk.embedding 计算相似度，再结合关键词、实体 gate 和标题/来源命中综合排序。
-    const scored = scoreChunk(chunk, entity, aliases, terms, queryVector);
+    const scored = scoreChunk(chunk, entity, aliases, terms, queryVector, theme);
     rows.push({
       chunk,
       gate,
