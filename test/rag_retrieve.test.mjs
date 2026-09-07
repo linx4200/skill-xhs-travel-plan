@@ -182,7 +182,7 @@ test("city place-specific penalty can break a small score advantage", async () =
   assert.equal(placeNearby.score.contributions.city_place_specific_penalty, -0.12);
 });
 
-test("backup places theme does not penalize place-specific city chunks", async () => {
+test("backup places theme gives place-specific city chunks the strongest penalty", async () => {
   const backupPlacesIndex = {
     chunks: [
       {
@@ -211,13 +211,13 @@ test("backup places theme does not penalize place-specific city chunks", async (
   const result = await retrieve(backupPlacesIndex, { city: "甲城市", theme: "backup_places", topK: 10, includeDiagnostics: true });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
-    ["place-backup", "city-backup"],
+    ["city-backup", "place-backup"],
   );
 
   const placeBackup = result.diagnostics.chunks.find((item) => item.chunk_id === "place-backup");
   assert.equal(placeBackup.score.signals.city_place_specific_penalty, 1);
-  assert.equal(placeBackup.score.weights.city_place_specific_penalty, 0);
-  assert.equal(placeBackup.score.contributions.city_place_specific_penalty, 0);
+  assert.equal(placeBackup.score.weights.city_place_specific_penalty, -0.3);
+  assert.equal(placeBackup.score.contributions.city_place_specific_penalty, -0.3);
 });
 
 test("city retrieval does not fall back to title or text city matches without candidate_cities", async () => {

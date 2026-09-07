@@ -751,7 +751,7 @@ unresolved high-risk fields or conflicts
 城市填充规则：
 
 - 城市固定在所有地点之后处理。原因是城市页是否有独立增量价值，必须先排除已经被地点页、每日页、全局提醒或确认清单吸收的内容。
-- 城市检索只读取 `candidate_cities` 命中目标城市的 chunks；绑定具体 `candidate_places` 的地点级城市命中已在评分阶段按 theme 软降级，`backup_places` 不扣分。填充城市 facts 时仍需判断内容是否有独立城市级增量价值。
+- 城市检索只读取 `candidate_cities` 命中目标城市的 chunks；绑定具体 `candidate_places` 的地点级城市命中已在评分阶段按 theme 软降级，其中 `backup_places` 扣分最重，优先寻找有城市归属但没有具体地点归属的备选信息。填充城市 facts 时仍需判断内容是否有独立城市级增量价值。
 - `cities.<城市名>.include` 只有在排除重复后仍满足 `info-rules.md` 的城市 include 标准时才设为 `true`。
 - 城市里的 `backup_places` 只能作为备选信息，不得自动加入每日 `route_places` 或改变用户路线。
 

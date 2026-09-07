@@ -48,7 +48,7 @@ JSON 版本重要字段：
 - `retrieval.city_themes`：城市默认检索主题，默认值来自 `scripts/rag_retrieval_config.mjs`。
 - `retrieval.place_top_k`、`city_top_k`：每个主题保留的结果数量，默认值来自 `scripts/rag_retrieval_config.mjs`。
 - `retrieval.max_place_chunks`、`max_city_chunks`：单个 target 跨主题去重后的最大阅读 chunk 数，默认值来自 `scripts/rag_retrieval_config.mjs`。
-- `retrieval.scoring`：检索排序策略说明，用于复现实验和调参。带 `place` 的检索只召回 `candidate_places` 命中目标地点的 chunk；带 `city` 的检索只召回 `candidate_cities` 命中目标城市的 chunk，并对同时绑定 `candidate_places` 的地点级 chunk 施加 theme-sensitive 软惩罚，`backup_places` 主题不扣分。若 chunks 含 embedding，则 query embedding 相似度参与主题候选池内排序；标题/正文关键词、实体、标题来源分和来源 penalty 保留为可解释排序信号。
+- `retrieval.scoring`：检索排序策略说明，用于复现实验和调参。带 `place` 的检索只召回 `candidate_places` 命中目标地点的 chunk；带 `city` 的检索只召回 `candidate_cities` 命中目标城市的 chunk，并对同时绑定 `candidate_places` 的地点级 chunk 施加 theme-sensitive 软惩罚，其中 `backup_places` 主题扣分最重，用于优先寻找有城市归属但没有具体地点归属的备选信息。若 chunks 含 embedding，则 query embedding 相似度参与主题候选池内排序；标题/正文关键词、实体、标题来源分和来源 penalty 保留为可解释排序信号。
 - `chunks_by_id`：本次批量检索命中的全局唯一 chunk 原文库；同一 chunk 即使命中多个 target 或 theme，`text` 也只保存一份。
 - `places.<地点名>.target`：地点 target 元信息，包括 `type`、`name`、`days` 和 `source_files_count`。
 - `places.<地点名>.unique_chunk_ids`：该地点跨主题去重后的 chunk 阅读顺序。

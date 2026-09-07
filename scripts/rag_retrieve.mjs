@@ -414,8 +414,8 @@ function isVideoChunk(chunk) {
 /**
  * 流程 5.3：城市检索时，命中城市但绑定具体景点的 chunk 使用软 penalty。
  *
- * 城市主题里的 `backup_places` 本来就需要召回景点素材，因此不扣分；未知主题按默认城市
- * penalty 处理，避免地点级 chunk 在城市级查询中过度占据候选排序。
+ * 城市主题里的 `backup_places` 用来找没有具体地点归属的城市级备选信息，因此扣分最重；
+ * 未知主题按默认城市 penalty 处理，避免地点级 chunk 在城市级查询中过度占据候选排序。
  */
 function cityPlaceSpecificPenaltyWeight(entity, theme) {
   if (entity?.type !== "city") return 0;
