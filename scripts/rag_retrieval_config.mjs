@@ -32,15 +32,16 @@ export const CITY_THEMES = {
   foods: ["美食", "好吃", "餐厅", "小吃", "夜市", "宵夜", "夜宵", "早餐", "早市", "烧烤", "火锅", "蔬菜", "咖啡", "奶茶", "特色菜", "本地人"],
   lodging: ["住宿", "酒店", "民宿", "客栈", "青旅", "位置", "商圈", "隔音", "性价比"],
   transport: ["停车", "路况", "导航", "限行", "交通", "自驾", "高铁", "大巴", "包车", "打车", "拼车", "公交"],
-  backup_places: ["景点", "观景台", "打卡点", "冷门", "小众", "顺路", "附近", "周边", "文创", "手信"],
+  backup_places: ["景点", "观景台", "打卡点", "冷门", "小众", "顺路", "附近", "周边", "文创", "手信", "带娃"],
   notes: ["风险", "注意", "安全", "贴士", "天气", "海拔", "温差", "高反", "绕路", "限流", "堵车", "物价", "宰客", "预约", "关门"],
 };
 
 /**
  * 城市检索中，命中目标城市但同时绑定具体 `candidate_places` 的地点级 chunk 软惩罚。
  *
- * `backup_places` 主题本来就需要召回具体景点素材，因此不扣分；未知城市主题使用默认值，
- * 避免地点级 chunk 在泛城市查询中挤占城市级吃住行和风险材料。
+ * `backup_places` 主题用于寻找“有城市归属但没有具体地点归属”的城市级备选信息，
+ * 因此对地点级 chunk 扣分最重；未知城市主题使用默认值，避免地点级 chunk 在泛城市
+ * 查询中挤占城市级吃住行和风险材料。
  */
 export const DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT = -0.12;
 export const CITY_PLACE_SPECIFIC_PENALTY_BY_THEME = {
@@ -48,7 +49,7 @@ export const CITY_PLACE_SPECIFIC_PENALTY_BY_THEME = {
   lodging: -0.18,
   transport: -0.12,
   notes: -0.12,
-  backup_places: 0,
+  backup_places: -0.3,
 };
 
 export const RAG_RETRIEVAL_DEFAULTS = {
