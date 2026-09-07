@@ -79,6 +79,8 @@ RAG happy path 中不要创建 `resource-index.json`、`reading-queue.json`、`s
 
 RAG 流程中，默认先按 `retrieval-workspace.json` 的 target 和 `unique_chunk_ids` 读取 chunks，再用 `themes` 辅助定位字段。不要把 chunk 原文、score、`matched_by` 或大段 evidence 写入 `facts-workspace.json`；只写 agent 判断后的可执行事实、冲突和待确认事项。
 
+写入 `facts-patch.json` 前必须先过展示字段写作门槛：内部判断可以保留材料线索，但 `trip.days[].summary/timeline/notes/confirmations`、`places.*` 和 `cities.*` 中会进入 HTML 的字段必须改成直接的执行表达，不得出现“材料指出”“材料中的”“材料还提到”“材料提到”“材料显示”“材料写到”“材料中出现”“资料中”“来源”等旁白式溯源。只允许保留必要的边界提示，例如 `材料未说明`、`需出行前确认`、`未确认`；冲突字段可以说明“记录时间不一”“说法不一致”，但不要写成资料审计口吻。写完 patch、运行 `apply_facts_patch.mjs` 前，先用搜索检查上述禁用表达，发现即改，不等到渲染后人工抽查。
+
 结构化流程中，默认先按 `source-digest.json.files[]` 的唯一文件顺序读取原文；如果 digest 尚未生成，才按 `reading-queue.json.files[]` 读取。不要按地点或城市逐项重复打开同一素材。文件读完后先把可用事实、冲突和全局提醒沉淀到 `source-digest.json`，再分发到 `facts-workspace.json`；如果没有生成 queue 或 digest，也必须先手工去重 `source_files` 再读原文。
 
 后续修改内容时，RAG 分支优先复用 `retrieval-workspace.json` 的 target、`unique_chunk_ids` 和 `themes` 定位相关 chunks；结构化分支优先复用 `source-digest.json` 判断是否需要回读原文。修改事实时优先写局部 facts patch，并用 `apply_facts_patch.mjs` 合并回 `facts-workspace.json`，再重新渲染；只有 HTML 结构规则变化时才改渲染脚本。命令输出应保持简短，只显示统计、异常和必要样例，避免把大段素材打印到对话里。
