@@ -93,12 +93,131 @@ test("query-only retrieval can still use keyword matches without candidate entit
   assert.equal(Object.hasOwn(result.results[0], "keywords"), false);
 });
 
-test("city retrieval prefers city-level chunks without candidate_places", async () => {
-  const result = await retrieve(index, { city: "甲城市", theme: "transport", topK: 10 });
+test("city retrieval softly penalizes place-specific chunks", async () => {
+  const result = await retrieve(index, { city: "甲城市", theme: "transport", topK: 10, includeDiagnostics: true });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
     ["city-lodging", "a-text-only", "a-place-safety", "b-place-safety"],
   );
+
+  const placeSpecific = result.diagnostics.chunks.find((item) => item.chunk_id === "a-place-safety");
+  assert.equal(placeSpecific.score.signals.city_place_specific_penalty, 1);
+  assert.equal(placeSpecific.score.contributions.city_place_specific_penalty, -0.12);
+
+  const cityLevel = result.diagnostics.chunks.find((item) => item.chunk_id === "city-lodging");
+  assert.equal(cityLevel.score.signals.city_place_specific_penalty, 0);
+  assert.equal(cityLevel.score.contributions.city_place_specific_penalty, 0);
+});
+
+test("city place-specific penalty does not override a clearly stronger score", async () => {
+  const cityPenaltyIndex = {
+    chunks: [
+      {
+        chunk_id: "city-general",
+        source_uri: "resources/city-general.json",
+        resource_path: "city-general.json",
+        title: "城市通用提醒",
+        text: "通用信息。",
+        candidate_places: [],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+      {
+        chunk_id: "place-strong",
+        source_uri: "resources/place-strong.json",
+        resource_path: "place-strong.json",
+        title: "景点交通",
+        text: "甲城市 停车 自驾 导航 路况 包车。",
+        candidate_places: ["A地方"],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+    ],
+  };
+
+  const result = await retrieve(cityPenaltyIndex, { city: "甲城市", theme: "transport", topK: 10, includeDiagnostics: true });
+  assert.deepEqual(
+    result.results.map((item) => item.chunk_id),
+    ["place-strong", "city-general"],
+  );
+
+  const placeStrong = result.diagnostics.chunks.find((item) => item.chunk_id === "place-strong");
+  assert.equal(placeStrong.score.contributions.city_place_specific_penalty, -0.12);
+  assert.equal(placeStrong.score.total > 0.35, true);
+});
+
+test("city place-specific penalty can break a small score advantage", async () => {
+  const cityPenaltyIndex = {
+    chunks: [
+      {
+        chunk_id: "city-focused",
+        source_uri: "resources/city-focused.json",
+        resource_path: "city-focused.json",
+        title: "甲城市交通",
+        text: "停车 自驾。",
+        candidate_places: [],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+      {
+        chunk_id: "place-nearby",
+        source_uri: "resources/place-nearby.json",
+        resource_path: "place-nearby.json",
+        title: "景点交通",
+        text: "甲城市 停车 自驾 导航 路况 包车。",
+        candidate_places: ["A地方"],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+    ],
+  };
+
+  const result = await retrieve(cityPenaltyIndex, { city: "甲城市", theme: "transport", topK: 10, includeDiagnostics: true });
+  assert.deepEqual(
+    result.results.map((item) => item.chunk_id),
+    ["city-focused", "place-nearby"],
+  );
+
+  const placeNearby = result.diagnostics.chunks.find((item) => item.chunk_id === "place-nearby");
+  assert.equal(placeNearby.score.contributions.city_place_specific_penalty, -0.12);
+});
+
+test("backup places theme does not penalize place-specific city chunks", async () => {
+  const backupPlacesIndex = {
+    chunks: [
+      {
+        chunk_id: "city-backup",
+        source_uri: "resources/city-backup.json",
+        resource_path: "city-backup.json",
+        title: "甲城市备选",
+        text: "冷门 小众。",
+        candidate_places: [],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+      {
+        chunk_id: "place-backup",
+        source_uri: "resources/place-backup.json",
+        resource_path: "place-backup.json",
+        title: "甲城市观景台",
+        text: "景点 打卡点 冷门 小众 顺路 附近。",
+        candidate_places: ["A地方"],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+    ],
+  };
+
+  const result = await retrieve(backupPlacesIndex, { city: "甲城市", theme: "backup_places", topK: 10, includeDiagnostics: true });
+  assert.deepEqual(
+    result.results.map((item) => item.chunk_id),
+    ["place-backup", "city-backup"],
+  );
+
+  const placeBackup = result.diagnostics.chunks.find((item) => item.chunk_id === "place-backup");
+  assert.equal(placeBackup.score.signals.city_place_specific_penalty, 1);
+  assert.equal(placeBackup.score.weights.city_place_specific_penalty, 0);
+  assert.equal(placeBackup.score.contributions.city_place_specific_penalty, 0);
 });
 
 test("city retrieval does not fall back to title or text city matches without candidate_cities", async () => {
