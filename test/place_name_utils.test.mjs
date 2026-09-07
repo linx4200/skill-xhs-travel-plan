@@ -50,6 +50,7 @@ test("relatedPlaceName matches aliases, normalized names, and containment", () =
     小七孔: ["荔波小七孔景区"],
   };
 
+  assert.equal(relatedPlaceName("盐津县城","盐津老县城"), true);
   assert.equal(relatedPlaceName("九洞天景区", "九洞天"), true);
   assert.equal(relatedPlaceName("小七孔", "荔波小七孔", customAliases), true);
   assert.equal(relatedPlaceName("黄果树瀑布景区", "黄果树瀑布东门"), true);
