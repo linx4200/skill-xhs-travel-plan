@@ -10,7 +10,7 @@ RAG 介入 facts 生成的总体设计见 [rag-facts-framework.md](rag-facts-fra
 
 - 用户路线，或 agent 已创建的 `route-structure.json`。
 - `rag-index.json`。
-- 可选的原始资源目录。本流程不回读原始文本材料；如果需要本地照片，使用 `rag-index.resource_root/photos`。
+- 可选的原始资源目录。本流程不回读原始文本材料；如果需要本地照片，使用 `rag-index.source_chunks/photos`，且只按照片目录名、文件名和路径归属照片。
 
 `rag-index.json` 可以是 JSON 或旧版 JSONL。JSON 版本的每个 chunk 至少应包含：
 
@@ -45,11 +45,11 @@ node scripts/validate_rag_index.mjs <rag-index.json>
 
 - 顶层应能解析为 JSON 或 JSONL。
 - chunk 应包含可用于检索的 `chunk_id`、`source_uri`、`title`、`text`、`candidate_places` 和 `candidate_cities`。
-- 如果需要渲染本地照片，`resource_root` 应指向可读资源目录，且照片应位于 `photos/` 下。
+- 如果需要渲染本地照片，`source_chunks` 应指向可读资源目录，且照片应位于 `<source_chunks>/photos/` 下。校验脚本只统计和定位照片路径，不读取、OCR 或视觉解析图片内容。
 
 如果 `rag-index.json` 与用户描述不符，让后续工作区脚本自然失败并停止流程，向用户报告脚本错误即可。命令输出只保留统计和错误；不要把 `chunks[].text`、chunk 标题列表或 `embedding` 打印到对话上下文。
 
-RAG 主流程不生成 `resource-index.json`。`facts-workspace.json` 的地点/城市来源线索来自 RAG chunks 的 `source_uri`，照片归属由 `create_fact_workspace.mjs --rag-index` 直接扫描 `resource_root/photos` 得到。
+RAG 主流程不生成 `resource-index.json`。`facts-workspace.json` 的地点/城市来源线索来自 RAG chunks 的 `source_uri`，照片归属由 `create_fact_workspace.mjs --rag-index` 直接扫描 `source_chunks/photos` 的目录名、文件名和路径得到。
 
 ## Step 3：创建 Skeleton Facts Workspace
 
@@ -99,6 +99,8 @@ Agent 读取 `retrieval-workspace.json` 后填充 `facts-workspace.json`：
 7. 用 `node scripts/apply_facts_patch.mjs --facts <工作目录>/facts-workspace.json --patch <工作目录>/facts-patch.json` 合并 patch。
 
 第五步结束时只得到第一版 facts；`needs_agent_review` 仍保持 `true`。后续是否补检索、记录缺口、联网白名单查询或渲染 HTML，由第六步及之后流程决定。
+
+填充 facts 时不得读取或解析 `photos/` 图片画面。照片只用于按文件名/目录名匹配到 `places.*.photos`，不能用图片画面补充景点看点、入口、路线、路况、天气、人流或其他攻略事实。
 
 ## 缺口处理边界
 

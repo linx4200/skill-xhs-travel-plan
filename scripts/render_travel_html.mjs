@@ -307,7 +307,8 @@ function render(facts, outDir, skillRoot) {
     throw new Error(`Missing template stylesheet: ${cssSource}`);
   }
   fs.copyFileSync(cssSource, path.join(outDir, "reading-first.css"));
-  let resourceRoot = facts.source?.resource_root || ".";
+  const source = facts.source ?? {};
+  let resourceRoot = source.rag_index ? source.source_chunks || "." : source.resource_root || ".";
   if (!path.isAbsolute(resourceRoot)) resourceRoot = path.resolve(skillRoot, resourceRoot);
 
   fs.writeFileSync(path.join(outDir, "index.html"), renderTemplate(skillRoot, "index.ejs", prepareIndex(facts)), "utf8");

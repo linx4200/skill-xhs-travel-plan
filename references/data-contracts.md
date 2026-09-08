@@ -65,9 +65,10 @@
 - `schema_version`：数据结构版本。
 - `needs_agent_review`：脚本生成后默认为 `true`，表示还需要 agent 填事实和判断。
 - `title`：攻略标题。
-- `source.resource_root`：输入材料文件夹路径；渲染本地照片时使用。
+- `source.resource_root`：结构化流程的输入材料文件夹路径；RAG-only 分支可为空字符串。
 - `source.resource_index`：素材索引文件名。RAG-only 分支可为空字符串。
 - `source.rag_index`：RAG 分支使用的索引文件名或相对路径；结构化分支可不存在。
+- `source.source_chunks`：RAG 分支使用的 chunk 来源目录；本地照片来自 `<source_chunks>/photos/`，且只按照片目录名、文件名和路径处理。
 - `source.route_structure`：路线结构文件名。
 - `trip.mode`：出行方式。
 - `trip.days`：每日路线、摘要、timeline、当天提醒。
