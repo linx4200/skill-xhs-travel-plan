@@ -50,6 +50,18 @@
 - 特殊人群和环境：老人、小孩、体力、天气、高海拔、安全相关提醒。
 - 本地照片：只使用输入材料文件夹中的本地图片；只按 `photos/景点名/`、`photos/县城名/`、`photos/路线地点别名/` 等目录名和图片文件名归属照片，不读取或解析图片内容。
 
+## 海拔信息规则
+
+只要 agent 阅读到的本地材料、`source-digest.json`、`reading-queue.json`、`retrieval-workspace.json` 或 RAG chunk 中出现本次行程城市或 `route_places` 地点的海拔数值，就必须写入 `facts-workspace.json` 对应目标。
+
+- 城市海拔写入 `cities.<城市名>.elevation_m`。
+- 景点海拔写入 `places.<景点名>.elevation_m`。
+- `elevation_m` 只保存米制数字；原文为“海拔约 2,601 米”这类表达时，写入 `2601`。
+- 若材料自带可追溯网页来源，可同步写入 `elevation_source_url`；若海拔来自本地文件或 RAG chunk，保留在 `source_files` 或 digest 来源线索中即可。
+- `elevation_checked_at` 只在用户明确授权的独立联网核验中填写；仅阅读本地材料时留空。
+- 不同材料的海拔数值差异足以影响高反、衣物或路线判断时，把差异写入对应目标的 `notes` 或 `conflicts`。
+- 材料没有给出海拔时，不补写、不猜测；只有缺失海拔会影响实际出行判断时，才把 `材料未说明` 或 `需出行前自行确认` 写入相关提醒/确认字段。
+
 ## 缺失、冲突和不确定信息
 
 字段只有在材料有有效信息，或会影响出行决策时才写。没有有效依据时不要硬凑。

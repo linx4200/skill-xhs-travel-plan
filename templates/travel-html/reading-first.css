@@ -16,6 +16,7 @@
   --marker:#747474;        /* timeline 节点 */
   --soft:#f6f6f5;          /* 折叠标题悬停底色 */
   --page:#f3f3f2;          /* 正文栏外的页面底色 */
+  --alert:#b42318;         /* 高海拔等强提醒色 */
   --measure:680px;         /* 移动端优先的正文最大宽度 */
 }
 
@@ -72,6 +73,11 @@ p{margin:10px 0;color:var(--text)}
 ul{margin:10px 0;padding-left:1.4em}
 li{margin:6px 0}
 a{color:#1a5fb4}
+
+.elevation-alert{
+  color:var(--alert);
+  font-weight:700;
+}
 
 .meta{
   margin:8px 0 14px;

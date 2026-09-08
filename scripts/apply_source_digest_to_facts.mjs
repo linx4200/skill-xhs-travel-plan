@@ -57,6 +57,8 @@ function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+const SCALAR_FACT_FIELDS = new Set(["elevation_m", "elevation_source_url", "elevation_checked_at"]);
+
 /**
  * 从字符串或对象列表项中取出可用于去重和展示的正文。
  */
@@ -140,6 +142,24 @@ function appendItems(target, items, sourceRef) {
   return { added, merged };
 }
 
+function emptyScalar(value) {
+  return value === null || value === undefined || value === "";
+}
+
+function normalizeScalarValue(field, value) {
+  const text = textOf(value);
+  if (field !== "elevation_m") return text;
+  const numericText = text.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/)?.[0] ?? "";
+  const numeric = Number(numericText);
+  if (!Number.isFinite(numeric)) throw new Error(`elevation_m must include a numeric value, got: ${text}`);
+  return Math.round(numeric);
+}
+
+function scalarEqual(field, left, right) {
+  if (field === "elevation_m") return Number(left) === Number(right);
+  return String(left ?? "").trim() === String(right ?? "").trim();
+}
+
 /**
  * 生成 day fact 可匹配的稳定 key，支持按 day 编号、日期或标题定位。
  */
@@ -175,7 +195,7 @@ function ensureGlobalNotesGroup(facts, groupName) {
 }
 
 /**
- * 根据 target_type、target_name 和 field 找到 facts 中的目标数组字段。
+ * 根据 target_type、target_name 和 field 找到 facts 中的目标字段。
  */
 function routeFactTarget(facts, fact) {
   const targetType = String(fact?.target_type ?? "").trim();
@@ -185,29 +205,31 @@ function routeFactTarget(facts, fact) {
   if (targetType === "place") {
     const place = facts.places?.[targetName];
     if (!place) throw new Error(`Unknown place target_name: ${targetName}`);
+    if (SCALAR_FACT_FIELDS.has(field) && Object.hasOwn(place, field)) return { kind: "scalar", object: place, field };
     if (!Array.isArray(place[field])) throw new Error(`Unsupported place array field: places.${targetName}.${field}`);
-    return place[field];
+    return { kind: "array", items: place[field] };
   }
 
   if (targetType === "city") {
     const city = facts.cities?.[targetName];
     if (!city) throw new Error(`Unknown city target_name: ${targetName}`);
+    if (SCALAR_FACT_FIELDS.has(field) && Object.hasOwn(city, field)) return { kind: "scalar", object: city, field };
     if (!Array.isArray(city[field])) throw new Error(`Unsupported city array field: cities.${targetName}.${field}`);
-    return city[field];
+    return { kind: "array", items: city[field] };
   }
 
   if (targetType === "day") {
     const day = findDay(facts, targetName);
     if (!day) throw new Error(`Unknown day target_name: ${targetName}`);
     if (!Array.isArray(day[field])) throw new Error(`Unsupported day array field: trip.days[].${field}`);
-    return day[field];
+    return { kind: "array", items: day[field] };
   }
 
   if (targetType === "global") {
     if (field !== "global_notes") throw new Error(`Global fact must use field global_notes, got: ${field}`);
-    if (targetName) return ensureGlobalNotesGroup(facts, targetName);
+    if (targetName) return { kind: "array", items: ensureGlobalNotesGroup(facts, targetName) };
     if (!Array.isArray(facts.global_notes)) facts.global_notes = asList(facts.global_notes).filter((item) => textOf(item));
-    return facts.global_notes;
+    return { kind: "array", items: facts.global_notes };
   }
 
   if (targetType === "confirmation") {
@@ -215,10 +237,29 @@ function routeFactTarget(facts, fact) {
       throw new Error(`Confirmation fact must use field confirm_before_departure, got: ${field}`);
     }
     if (!Array.isArray(facts.confirm_before_departure)) facts.confirm_before_departure = asList(facts.confirm_before_departure);
-    return facts.confirm_before_departure;
+    return { kind: "array", items: facts.confirm_before_departure };
   }
 
   throw new Error(`Unsupported target_type: ${targetType}`);
+}
+
+function applyFactToTarget(target, fact, sourceRef) {
+  if (target.kind === "array") {
+    const result = appendItems(target.items, fact.items, sourceRef);
+    return { ...result, scalarSet: 0, scalarKept: 0 };
+  }
+
+  const item = asList(fact.items)[0];
+  const value = normalizeScalarValue(target.field, item);
+  const existing = target.object[target.field];
+  if (emptyScalar(existing)) {
+    target.object[target.field] = value;
+    return { added: 0, merged: 0, scalarSet: 1, scalarKept: 0 };
+  }
+  if (scalarEqual(target.field, existing, value)) {
+    return { added: 0, merged: 0, scalarSet: 0, scalarKept: 1 };
+  }
+  throw new Error(`Conflicting scalar field ${target.field}: existing ${existing}, new ${value}`);
 }
 
 /**
@@ -232,6 +273,8 @@ function applyDigestToFacts(digest, facts) {
     facts_applied: 0,
     items_added: 0,
     items_merged: 0,
+    scalar_fields_set: 0,
+    scalar_fields_kept: 0,
   };
   const errors = [];
 
@@ -247,10 +290,12 @@ function applyDigestToFacts(digest, facts) {
       const location = `${String(file?.path ?? "(missing path)") || "(missing path)"}#${String(fact?.id ?? "(missing id)") || "(missing id)"}`;
       try {
         const target = routeFactTarget(facts, fact);
-        const result = appendItems(target, fact.items, digestSourceRef(file, fact));
+        const result = applyFactToTarget(target, fact, digestSourceRef(file, fact));
         stats.facts_applied += 1;
         stats.items_added += result.added;
         stats.items_merged += result.merged;
+        stats.scalar_fields_set += result.scalarSet;
+        stats.scalar_fields_kept += result.scalarKept;
       } catch (error) {
         errors.push({ location, message: error.message });
       }
@@ -282,7 +327,7 @@ function main() {
 
   writeJson(args.out, facts);
   console.log(
-    `Applied source digest: ${report.stats.facts_applied}/${report.stats.facts_seen} facts, ${report.stats.items_added} items added, ${report.stats.items_merged} duplicates merged.`,
+    `Applied source digest: ${report.stats.facts_applied}/${report.stats.facts_seen} facts, ${report.stats.items_added} items added, ${report.stats.items_merged} duplicates merged, ${report.stats.scalar_fields_set} scalar fields set.`,
   );
 }
 

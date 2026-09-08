@@ -105,7 +105,7 @@ node scripts/apply_facts_patch.mjs \
 
 1. 做引用完整性检查：facts 中的地点和城市都有对应 retrieval target，且 `unique_chunk_ids` / `themes.*[].chunk_id` 都能在 `chunks_by_id` 中找到。
 2. 按每日 `route_places` 顺序处理 `places`，先读 `unique_chunk_ids`，再用 `themes` 辅助定位字段。
-3. 将有效事实整理成 facts patch，只写判断后的执行信息、冲突和待确认事项，不复制 chunk 原文。
+3. 将有效事实整理成 facts patch，只写判断后的执行信息、冲突和待确认事项，不复制 chunk 原文；如果 chunk 中出现对应地点或城市的海拔数值，必须写入 `places.<地点名>.elevation_m` 或 `cities.<城市名>.elevation_m`。
 4. 基于已写地点内容整理 `trip.days[].summary`、`timeline`、`notes` 和 `confirmations`。
 5. 所有地点处理完成后再处理 `cities`。城市页 `include` 判断必须先排除已经写进地点页、每日页、全局提醒或确认清单的内容。
 6. 最后整理 `global_notes` 和 `confirm_before_departure`。
@@ -151,6 +151,7 @@ node scripts/apply_facts_patch.mjs \
 进入渲染前，确认：
 
 - 每个 `route_places` 地点都有可用内容，或明确记录材料不足。
+- RAG chunks 中已经出现的城市或景点海拔都已写入对应 `elevation_m`；海拔缺失按 [info-rules.md](info-rules.md) 处理。
 - 路线外地点不会进入每日详情。
 - 城市页只为 `include: true` 的城市生成。
 - 高风险事实不被无来源地断言。
