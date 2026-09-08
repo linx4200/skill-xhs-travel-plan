@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { TextDecoder } from "node:util";
+import { canonicalPlaceName, placeAliases } from "./place_name_utils.mjs";
 
 const TEXT_EXTS = new Set([".json", ".md", ".markdown", ".txt"]);
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]);
@@ -255,8 +256,14 @@ function scan(resourceDir, explicitPlaces, explicitCities) {
     if (!TEXT_EXTS.has(path.extname(filePath).toLowerCase())) continue;
     const text = decodeText(filePath);
     const rel = toPosix(path.relative(root, filePath));
-    const matchedPlaces = places.filter((place) => place && (text.includes(place) || rel.includes(place)));
-    const matchedCities = cities.filter((city) => city && (text.includes(city) || rel.includes(city)));
+    const matchedPlaces = places.filter((place) => {
+      const aliases = placeAliases(place);
+      return aliases.some((alias) => text.includes(alias) || rel.includes(alias));
+    });
+    const matchedCities = cities.filter((city) => {
+      const aliases = [...new Set([city, canonicalPlaceName(city), ...placeAliases(city)])].filter(Boolean);
+      return aliases.some((alias) => text.includes(alias) || rel.includes(alias));
+    });
     const matchedKeywords = UTILITY_KEYWORDS.filter((word) => text.includes(word));
     files.push({
       path: rel,

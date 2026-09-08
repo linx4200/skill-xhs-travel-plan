@@ -3,6 +3,7 @@ import ejs from "ejs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { dayDisplayTitle } from "./day_title_utils.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SKILL_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -48,6 +49,7 @@ function asList(value) {
  */
 function textOf(item) {
   if (item && typeof item === "object" && !Array.isArray(item)) {
+    if (Object.hasOwn(item, "text")) return String(item.text ?? "");
     for (const key of ["text", "summary", "name", "title"]) {
       if (item[key]) return String(item[key]);
     }
@@ -109,7 +111,7 @@ function includedCities(facts) {
 function dayTitle(day) {
   const no = day.day ?? "";
   const fallback = [day.date, (day.route_places ?? []).join(" / ")].filter(Boolean).join("｜");
-  const title = day.title || fallback;
+  const title = dayDisplayTitle(day.title || fallback, day.lodging_city);
   return no ? `Day ${no}｜${title}` : String(title);
 }
 
@@ -166,7 +168,7 @@ function noteGroups(value) {
  */
 function preparePhotos(place, photos, resourceRoot, outDir) {
   const prepared = [];
-  for (const photo of asList(photos).slice(0, 3)) {
+  for (const photo of asList(photos)) {
     const photoPath = textOf(photo);
     const rel = copyPhoto(photoPath, place, resourceRoot, outDir);
     if (!rel) continue;

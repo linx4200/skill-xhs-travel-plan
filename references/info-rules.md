@@ -1,12 +1,14 @@
 # 信息提取与内容取舍规则
 
-本文件用于判断哪些信息可以成为攻略事实，以及这些事实应该放到 `facts-workspace.json` 的哪个位置。JSON 字段契约见 [data-contracts.md](data-contracts.md)；结构化脚本流程见 [structured-generation-workflow.md](structured-generation-workflow.md)。
+本文件用于判断哪些信息可以成为攻略事实，以及这些事实应该放到 `source-digest.json` 和 `facts-workspace.json` 的哪个位置。JSON 字段契约见 [data-contracts.md](data-contracts.md)；结构化脚本流程见 [structured-generation-workflow.md](structured-generation-workflow.md)。
 
 生成 HTML 前还必须按 [pre-render-online-research.md](pre-render-online-research.md) 做独立的联网需求判断。除用户另行明确授权外，只能查询该 reference 白名单中列出的信息；不要联网补充营业时间、票价、天气、交通时长或图片。
 
 ## 总体原则
 
-读取用户提供的输入文件夹，把其中的文本材料统一视为输入材料。先按地点、主题和用途归类，再压缩成可执行信息；不要把相关句子机械摘录成连续列表。
+读取用户提供的输入文件夹，把其中的文本材料统一视为输入材料。使用结构化流程时，先按 `source-digest.json.files[]` 的唯一文件顺序读原文；如果 digest 尚未生成，才按 `reading-queue.json.files[]` 读取。每打开一个文件，就同时处理它服务的所有地点、城市和全局事项。先把文件级事实、冲突和全局提醒沉淀到 digest，再分发到 `facts-workspace.json`；不要按地点或城市逐项重复读取同一文件。
+
+整理材料时先按地点、主题和用途归类，再压缩成可执行信息；不要把相关句子机械摘录成连续列表。
 
 只提取材料中明确出现、或可从用户路线和材料上下文直接归纳的信息。不要用常识、想象、营销式表达或未经授权的联网结果补足空白。成文时直接陈述整理后的事实和判断，不要使用 `材料指出`、`材料中的`、`材料还提到` 这类旁白式来源表述。
 
@@ -21,7 +23,7 @@
 
 解析用户路线规划，提取每天的日期、城市、景点和活动，得到 `route-structure.json.days` 与候选城市清单。具体字段见 [data-contracts.md](data-contracts.md)。
 
-住宿城市必须由 agent 在路线解析阶段判断并写入 `route-structure.json.days[].lodging_city`。用户路线出现“宿某地”“住某地”“继续住某地”等住宿安排时，`lodging_city` 填对应城市；当天标题 `days[].title` 必须包含该城市。不要依赖脚本从 `source_line` 用正则抽取住宿信息。
+住宿城市必须由 agent 在路线解析阶段判断并写入 `route-structure.json.days[].lodging_city`。用户路线出现“宿某地”“住某地”“继续住某地”等住宿安排时，`lodging_city` 填对应城市；当天标题 `days[].title` 不写住宿后缀，最终展示标题由脚本根据 `lodging_city` 统一追加。不要依赖脚本从 `source_line` 用正则抽取住宿信息。
 
 `route_places` 只放用户路线中明确出现、且会在当天实际游玩或短停的真实地点。它通常是景点/景区，也可以是用户明确写了“游玩”“逛”“短停”“打卡”的古镇、县城老城、街区、观景台或村镇。必须排除只承担出发、住宿、中转或行政定位作用的城市名，以及停车场、游客中心、售票处、入口、公交站、车站、码头、餐厅、酒店、商场和普通导航点。
 
@@ -79,7 +81,7 @@
 - 景区内部多条路线要分别整理适合人群、顺序、优缺点。
 - 出现不同玩法或游玩方式时，必须拆成独立方案处理，例如常规景区、外围点位、不进景区看风景、不同入口、不同导航点。
 - 本地照片只使用输入材料文件夹中的图片，并按 `route_places` 地点归属展示到对应每日景点详情中。凡是进入 `route_places` 的地点，只要输入材料中存在可归属的本地照片，就应填入该地点的 `places.<地点名>.photos`；不要因为它是县城、老城、街区或观景点而跳过。照片目录名与地点名不完全一致但明显同指时也要匹配，例如 `route_places` 为“盐津县城”时可使用 `photos/盐津/`，为“九洞天景区”时可使用 `photos/九洞天/`。没有对应照片的地点才留空，渲染时跳过照片区域。
-- `source_files` 只用于 agent 读取原文，不要写进最终正文。
+- `source_files` 只用于 agent 追溯和回读原文，不要写进最终正文；结构化流程的默认读取顺序应以 `source-digest.json` 或 `reading-queue.json` 的唯一文件列表为准。
 
 ## 城市信息和 include 判断
 
@@ -114,7 +116,7 @@
 - `shopping`：购物点、伴手礼、市场、商业街及避坑信息。
 - `notes`：城市级风险、天气、海拔、体力、安全、文化习俗、禁忌和其他注意事项。
 
-没有实质内容的小节直接留空。不要为了让城市页显得完整而填空话。`source_files` 只用于 agent 读取原文，不要写进最终正文。
+没有实质内容的小节直接留空。不要为了让城市页显得完整而填空话。`source_files` 只用于 agent 追溯和回读原文，不要写进最终正文；结构化流程的默认读取顺序应以 `source-digest.json` 或 `reading-queue.json` 的唯一文件列表为准。
 
 ## 全局提醒和出发前确认
 
