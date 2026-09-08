@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { retrieve } from "../scripts/rag_retrieve.mjs";
+import { retrieve } from "../scripts/rag/rag_retrieve.mjs";
 
 const index = {
   chunks: [

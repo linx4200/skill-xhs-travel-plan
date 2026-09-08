@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { cleanDayTitle } from "./day_title_utils.mjs";
 import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
-import { loadRagIndex } from "./rag_retrieve.mjs";
+import { loadRagIndex } from "./rag/rag_retrieve.mjs";
 
 const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]);
 

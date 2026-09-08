@@ -14,7 +14,7 @@ npm run rag:workspace -- --facts <工作目录>/facts-workspace.json --rag-index
 
 `rag:retrieve` / `rag:workspace` 会在 `rag-index.json` 的 chunks 含有 `embedding` 向量时调用真实 embedding API 生成查询向量。默认接口为 `http://localhost:11434/api/embed`，模型优先读取 `rag-index.json` 的 `embedding.model`，也可用 `--embedding-url`、`--embedding-model` 或环境变量 `RAG_EMBEDDING_URL`、`RAG_EMBEDDING_MODEL` 覆盖。若 URL 是 `localhost` / `127.0.0.1` / `::1`，在 Codex 受限执行环境中应直接使用可访问宿主机 loopback 的运行方式执行检索脚本，避免先在沙箱里失败一次。需要临时关闭向量排序时传 `--no-embedding`。
 
-影响 RAG 召回范围的默认参数集中在 `scripts/rag_retrieval_config.mjs`，包括 `rag:retrieve` 的默认返回 chunk 数、批量检索每个 theme 保留的 chunk 数，以及单个地点/城市跨 theme 的最大阅读池大小。CLI 参数仍可临时覆盖这些默认值。
+影响 RAG 召回范围的默认参数集中在 `scripts/rag/rag_retrieval_config.mjs`，包括 `rag:retrieve` 的默认返回 chunk 数、批量检索每个 theme 保留的 chunk 数，以及单个地点/城市跨 theme 的最大阅读池大小。CLI 参数仍可临时覆盖这些默认值。
 
 默认不生成 RAG 召回日志。只有用户明确要求 RAG 召回日志、检索日志或召回原因诊断时，才传 `--log <工作目录>/retrieval-log.json`。日志会按每个 target/theme 记录所有 chunk 的 entity gate、召回状态、向量余弦相似度、分项得分权重和贡献；不会复制完整 embedding 数组。
 

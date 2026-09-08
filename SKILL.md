@@ -9,65 +9,45 @@ metadata:
 
 当用户提供旅行路线和本地输入材料，并要求整理旅游攻略、行程页、城市页或移动端 HTML 攻略时，使用此 skill。最终内容默认使用中文。
 
-## 流程入口分支
+## 入口判断
 
-任务开始时先判断用户给的材料类型，并选择一个主流程。不要同时走两套读取流程。
-
-### 分支 A：RAG 流程
-
-当用户提供的核心材料是 `rag-index.json`，或 JSON 顶层包含 `chunks`、`source_chunks`、`resource_root`、`embedding` 等 RAG 索引字段时，直接走 RAG 流程，不走原来的 `reading-queue.json` / `source-digest.json` 结构化读取流程。
-
-RAG 检索使用真实 embedding API。运行 `create_retrieval_workspace.mjs` 或 `rag_retrieve.mjs` 前，如果 `rag-index.json` 的 chunks 含有 `embedding` 向量，先确认 embedding 配置：优先使用当前 shell 环境中的 `RAG_EMBEDDING_URL`、`RAG_EMBEDDING_MODEL`；`RAG_EMBEDDING_URL` 未设置时脚本默认使用 `http://localhost:11434/api/embed`；`RAG_EMBEDDING_MODEL` 未设置时脚本会回退到 `rag-index.json` 的 `embedding.model`。如果环境变量和索引里都没有 model，先询问用户模型名，或在用户同意时使用 `--no-embedding` 临时关闭向量排序。不要把 API key 写入 skill、reference 或项目文件；需要 key 时只通过环境变量传入。
-
-如果 embedding URL 是 `localhost`、`127.0.0.1` 或 `::1`，不要先在受限沙箱里试跑检索脚本；这类地址通常指向执行环境自身，可能访问不到用户宿主机上的 Ollama 服务。应在第一次运行 `create_retrieval_workspace.mjs` / `rag_retrieve.mjs` 时就请求在可访问本机 loopback 端口的执行环境里运行，并在说明中明确这是为了访问用户本地 embedding API。只有用户拒绝授权、或本地端点在可访问环境里仍失败时，才考虑 `--no-embedding` 降级或让用户检查 Ollama 服务。
-
-`rag-index.json` 体量很大，只能作为项目脚本的输入使用。Agent 不得用 `cat`、`sed`、`head`、`jq`、临时 `node -e` / Python 脚本或编辑器自行打开、抽样、检索、统计或读取其中的 `chunks`、`text`、`embedding` 等内容；也不得把它作为事实来源直接阅读。需要校验时运行 `scripts/validate_rag_index.mjs`，需要召回时运行 `scripts/create_retrieval_workspace.mjs` 或 `scripts/rag_retrieve.mjs`，之后只阅读这些脚本生成的轻量工作区和召回结果。
-
-RAG 流程先跑到第一版 `facts-workspace.json`：
-
-1. 读取用户路线，按 [references/info-rules.md](references/info-rules.md)、[references/data-contracts.md](references/data-contracts.md) 和 [references/rag-data-contracts.md](references/rag-data-contracts.md) 人工创建 `route-structure.json`。
-2. 用 `scripts/validate_rag_index.mjs <rag-index.json>` 校验索引可解析和必要字段完整；不要自行读取、抽样、统计、打印或预览完整索引。后续脚本失败时停止当前流程，并把失败原因告诉用户。如果后续需要本地照片，使用脚本从 `rag-index.source_chunks/photos` 归属照片；脚本和 agent 都只能按目录名、文件名和路径归属照片，不得读取、预览、OCR 或视觉解析图片内容。若 `source_chunks` 不存在或不可读，只影响照片归属，不进入原材料回读流程。
-3. 运行 `create_fact_workspace.mjs --rag-index` 创建带 schema 和路线骨架的 skeleton `facts-workspace.json`。
-4. 运行 `create_retrieval_workspace.mjs`，基于 `facts-workspace.json` 和 `rag-index.json` 批量创建 `retrieval-workspace.json`。默认不要传 `--log`，也不要创建 `retrieval-log.json`；只有用户明确要求 RAG 召回日志、检索日志或召回原因诊断时，才追加 `--log <工作目录>/retrieval-log.json`。
-5. Agent 读取 `retrieval-workspace.json`，按景点、城市和主题整理 facts patch，再用 `apply_facts_patch.mjs` 合并到第一版 `facts-workspace.json`；此时 `needs_agent_review` 仍保持 `true`，等待后续字段级 checklist、补检索、缺口处理或渲染前评估。
-
-RAG 分支的第 1 步复用结构化流程的路线解析规则；不生成 `resource-index.json`。第 3 步复用事实工作区骨架脚本，但输入改为 `rag-index.json`；第 4、5 步按 [references/rag-facts-framework.md](references/rag-facts-framework.md) 和 [references/rag-workflow.md](references/rag-workflow.md) 执行。
-
-RAG happy path 中不要创建 `resource-index.json`、`reading-queue.json`、`source-digest.json`、`read-log.json` 或 `retrieval-log.json`；只有用户明确要求 RAG 召回日志、检索日志或召回原因诊断时，才写入 `retrieval-log.json`。若用户明确不做原材料回读，则后续缺口只通过 facts checklist、定向 RAG 或“材料未说明 / 出行前确认”处理。
-
-### 分支 B：结构化流程
-
-当用户没有提供 `rag-index.json`，但输入材料规模较大、需要完整 HTML 攻略或后续可重复修改时，走结构化流程：`resource-index.json` 建素材索引，`facts-workspace.json` 建事实工作区，`reading-queue.json` 按唯一原文文件去重读取，`source-digest.json` 保存文件级事实摘要，最后用渲染脚本和校验脚本生成 HTML。
-
-材料很少、用户只要文字整理或单页草稿时，可以直接整理正文，但仍必须遵守事实边界和资料来源规则。
-
-## 参考文件路由
-
-不要在任务开始时一次性读取所有 reference。先根据用户目标和当前步骤选择最小必要文件；流程推进到对应阶段时再读取对应 reference。
-
-### 必读入口
-
-处理用户路线、输入材料、景点、城市、餐饮和整体旅程信息前，必须先读取 [references/info-rules.md](references/info-rules.md)。它是事实边界、路线解析、信息取舍、城市页 include 判断和内容去重的主规则。
+任务开始时先判断材料形态，选择一个主流程。不要同时走 RAG 和结构化读取流程。
 
 ### RAG 流程
 
-选择 RAG 分支时，在创建 `facts-workspace.json` 或读取 `retrieval-workspace.json` 前，必须读取 [references/data-contracts.md](references/data-contracts.md)、[references/rag-data-contracts.md](references/rag-data-contracts.md)、[references/rag-facts-framework.md](references/rag-facts-framework.md) 和 [references/rag-workflow.md](references/rag-workflow.md)。不要由 agent 读取 `rag-index.json` 本体；它只能传给项目脚本。RAG 第 1 步仍按 [references/structured-generation-workflow.md](references/structured-generation-workflow.md) 的路线解析规则执行，但不要生成 `resource-index.json`，也不要进入结构化流程的 `reading-queue.json` / `source-digest.json` 主路径。
+用户提供的核心材料是 `rag-index.json`，或 JSON 顶层包含 `chunks`、`source_chunks`、`resource_root`、`embedding` 等 RAG 索引字段时，走 RAG 流程。
+
+RAG 分支只把 `rag-index.json` 交给项目脚本读取，不走 `resource-index.json`、`reading-queue.json`、`source-digest.json`、`read-log.json` 主路径。默认也不生成 `retrieval-log.json`，除非用户明确要求召回日志、检索日志或召回原因诊断。
+
+进入 RAG 分支后读取：
+
+- [references/info-rules.md](references/info-rules.md)：路线解析、事实边界、字段取舍和城市页 include 判断。
+- [references/data-contracts.md](references/data-contracts.md)：`route-structure.json` 和 `facts-workspace.json` 共同字段。
+- [references/rag-data-contracts.md](references/rag-data-contracts.md)：RAG 专属 JSON 契约。
+- [references/rag-workflow.md](references/rag-workflow.md)：RAG 可执行步骤。
+
+不要为了 RAG 主流程读取结构化流程 reference；只有需要回看非 RAG 的完整结构化链路时才读取 [references/structured-generation-workflow.md](references/structured-generation-workflow.md)。
 
 ### 结构化流程
 
-当满足以下任一条件且没有提供 `rag-index.json` 时，在生成 `route-structure.json` 前读取 [references/data-contracts.md](references/data-contracts.md)、[references/structured-data-contracts.md](references/structured-data-contracts.md) 和 [references/structured-generation-workflow.md](references/structured-generation-workflow.md)，并优先使用其中的结构化低上下文流程。触发条件包括：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、用户需要完整静态 HTML 攻略、或用户希望后续可重复修改。
+用户没有提供 `rag-index.json`，但输入材料规模较大、需要完整 HTML 攻略或后续可重复修改时，走结构化流程：`resource-index.json` 建素材索引，`facts-workspace.json` 建事实工作区，`reading-queue.json` 按唯一原文文件去重读取，`source-digest.json` 保存文件级事实摘要，最后用渲染脚本和校验脚本生成 HTML。
 
-首次创建或修改 `route-structure.json` 或 `facts-workspace.json` 前，读取 [references/data-contracts.md](references/data-contracts.md)。首次创建或修改 RAG 分支专属 JSON 前，读取 [references/rag-data-contracts.md](references/rag-data-contracts.md)。首次创建或修改结构化分支专属 JSON 前，读取 [references/structured-data-contracts.md](references/structured-data-contracts.md)。后续只改正文表达、不触碰 JSON 结构时，不需要重复读取。
+满足以下任一条件时，读取 [references/data-contracts.md](references/data-contracts.md)、[references/structured-data-contracts.md](references/structured-data-contracts.md) 和 [references/structured-generation-workflow.md](references/structured-generation-workflow.md)：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、用户需要完整静态 HTML 攻略，或用户希望后续可重复修改。
 
-### 渲染前检查
+材料很少、用户只要文字整理或单页草稿时，可以直接整理正文，但仍必须遵守事实边界和资料来源规则。
 
-准备渲染 HTML 前，必须读取 [references/pre-render-online-research.md](references/pre-render-online-research.md)，独立判断本次攻略是否触发白名单联网查询项。除用户另行明确授权外，只能查询该 reference 明确允许的信息。
+## Reference 路由
 
-### 输出前检查
+不要在任务开始时一次性读取所有 reference。先按当前流程和当前阶段读取最小必要文件。
 
-提交完整攻略或 HTML 产物前，必须读取 [references/manual-quality-check.md](references/manual-quality-check.md)，完成人工质量检查。HTML 文件存在性、互链、CSS、首页导航、生成时间、远程资源和图片路径等机械检查由 `node scripts/verify_output.mjs` 执行。
+- 处理路线、景点、城市、餐饮和整体旅程事实前，必须先读取 [references/info-rules.md](references/info-rules.md)。
+- 首次创建或修改 `route-structure.json` 或 `facts-workspace.json` 前，读取 [references/data-contracts.md](references/data-contracts.md)。
+- 首次创建或修改 RAG 分支专属 JSON 前，读取 [references/rag-data-contracts.md](references/rag-data-contracts.md)。
+- 首次创建或修改结构化分支专属 JSON 前，读取 [references/structured-data-contracts.md](references/structured-data-contracts.md)。
+- 准备渲染 HTML 前，读取 [references/pre-render-online-research.md](references/pre-render-online-research.md)，独立判断是否触发白名单联网查询项。
+- 提交完整攻略或 HTML 产物前，读取 [references/manual-quality-check.md](references/manual-quality-check.md)，完成人工质量检查。
 
-### HTML 与样式
+## HTML 与样式
 
 常规完整 HTML 攻略应通过 `scripts/render_travel_html.mjs` 和 `templates/travel-html/*.ejs` 生成，并用 `scripts/verify_output.mjs` 校验。HTML 页面结构由模板、渲染脚本和校验脚本固化；使用渲染脚本且不改结构/样式时，不需要读取完整设计规范。
 
@@ -75,17 +55,11 @@ RAG happy path 中不要创建 `resource-index.json`、`reading-queue.json`、`s
 
 ## 工作原则
 
-生成完整攻略时，不要默认把所有素材全文、页面规范和 HTML 草稿同时塞进上下文。优先根据入口分支使用 RAG 流程或结构化流程；材料很少、用户只要文字整理或单页草稿时，可以直接整理，但仍要遵守资料边界。
+生成完整攻略时，不要默认把所有素材全文、页面规范和 HTML 草稿同时塞进上下文。优先按入口分支使用 RAG 流程或结构化流程。
 
 无论走 RAG 流程还是结构化流程，`photos/` 下的图片都只作为本地展示素材和文件名/目录名线索。Agent 不得打开图片、截图预览、使用视觉模型、OCR 或其他方式读取和解析图片画面内容；照片归属、`alt` 和 `caption` 只能根据 `photos/地点名/文件名`、明显别名、扩展名和已由文本材料确认的地点信息生成。仅图片画面看起来包含的信息不能作为攻略事实。
 
-RAG 流程中，默认先按 `retrieval-workspace.json` 的 target 和 `unique_chunk_ids` 读取 chunks，再用 `themes` 辅助定位字段。不要把 chunk 原文、score、`matched_by` 或大段 evidence 写入 `facts-workspace.json`；只写 agent 判断后的可执行事实、冲突和待确认事项。
-
-写入 `facts-patch.json` 前必须先过展示字段写作门槛：内部判断可以保留材料线索，但 `trip.days[].summary/timeline/notes/confirmations`、`places.*` 和 `cities.*` 中会进入 HTML 的字段必须改成直接的执行表达，不得出现“材料指出”“材料中的”“材料还提到”“材料提到”“材料显示”“材料写到”“材料中出现”“资料中”“来源”等旁白式溯源。只允许保留必要的边界提示，例如 `材料未说明`、`需出行前确认`、`未确认`；冲突字段可以说明“记录时间不一”“说法不一致”，但不要写成资料审计口吻。写完 patch、运行 `apply_facts_patch.mjs` 前，先用搜索检查上述禁用表达，发现即改，不等到渲染后人工抽查。
-
-结构化流程中，默认先按 `source-digest.json.files[]` 的唯一文件顺序读取原文；如果 digest 尚未生成，才按 `reading-queue.json.files[]` 读取。不要按地点或城市逐项重复打开同一素材。文件读完后先把可用事实、冲突和全局提醒沉淀到 `source-digest.json`，再分发到 `facts-workspace.json`；如果没有生成 queue 或 digest，也必须先手工去重 `source_files` 再读原文。
-
-后续修改内容时，RAG 分支优先复用 `retrieval-workspace.json` 的 target、`unique_chunk_ids` 和 `themes` 定位相关 chunks；结构化分支优先复用 `source-digest.json` 判断是否需要回读原文。修改事实时优先写局部 facts patch，并用 `apply_facts_patch.mjs` 合并回 `facts-workspace.json`，再重新渲染；只有 HTML 结构规则变化时才改渲染脚本。命令输出应保持简短，只显示统计、异常和必要样例，避免把大段素材打印到对话里。
+修改事实时优先写局部 `facts-patch.json`，用 `scripts/apply_facts_patch.mjs` 合并回 `facts-workspace.json`，再重新渲染。命令输出保持简短，只显示统计、异常和必要样例，避免把大段素材打印到对话里。
 
 优先输出可执行的旅行建议，删除套话、空话、重复信息和低价值占位内容。攻略应像给人看的执行清单，不要写成资料审计报告。
 
@@ -110,10 +84,6 @@ RAG 流程中，默认先按 `retrieval-workspace.json` 的 target 和 `unique_c
 3. 出行方式，例如自驾、高铁、包车、公共交通或步行为主。
 
 如果路线不完整但已经足以开始整理，可以先基于已知信息处理，并在输出中只列出真正影响执行的缺失项。
-
-## 质量检查
-
-完整攻略或 HTML 产物提交前，按 [references/manual-quality-check.md](references/manual-quality-check.md) 完成人工质量检查；不要只依赖 `node scripts/verify_output.mjs`。
 
 ## 禁止事项
 

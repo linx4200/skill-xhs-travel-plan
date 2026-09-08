@@ -24,7 +24,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { placeAliases, relatedPlaceName } from "./place_name_utils.mjs";
+import { placeAliases, relatedPlaceName } from "../place_name_utils.mjs";
 import {
   CITY_PLACE_SPECIFIC_PENALTY_BY_THEME,
   CITY_THEMES,
