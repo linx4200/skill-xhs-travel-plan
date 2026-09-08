@@ -1,0 +1,84 @@
+/**
+ * RAG 检索统一配置。
+ *
+ * 这里集中放会影响召回范围、阅读池大小和排序窗口的默认参数。
+ * CLI 传参仍然可以覆盖这些默认值；修改这里会影响未显式传参的脚本运行。
+ */
+
+/**
+ * 景点级检索主题。批量检索会按对象 key 顺序依次把各主题结果加入总阅读池；
+ * 阅读池满额后，后面的主题更难贡献新的 chunk。
+ * 每个 theme 对应一组用于匹配 chunk 标题和正文的中文触发词。
+ */
+export const PLACE_THEMES = {
+  highlights: ["看点", "出片", "宝藏", "必去", "值得", "精华", "机位", "推荐", "最佳", "夯"],
+  drawbacks: ["避雷", "避坑", "缺点", "差评", "不推荐", "踩雷", "失望"],
+  tickets: ["门票", "票价", "预约", "开放", "优惠", "套票", "免票", "半价", "购票", "闭园", "营业"],
+  transport: ["停车", "导航", "交通", "路况", "入口", "自驾", "高铁", "塞车", "包车", "打车", "班车", "接驳"],
+  routes: ["路线", "玩法", "游览", "顺序", "环线", "徒步", "索道", "游船", "观光车", "打卡点"],
+  nearby: ["周边", "附近", "景点", "顺路", "路线", "玩法", "半日游", "一日游", "小众", "打卡点"],
+  crowds: ["人流", "人少", "人多", "错峰", "排队", "拥挤", "限流", "早去", "晚去", "工作日", "节假日", "旺季"],
+  accessibility: ["无人机", "老人", "小孩", "亲子", "带娃", "推车", "无障碍", "台阶", "体力"],
+  facilities: ["厕所", "卫生间", "补给", "吃的", "美食", "餐饮", "小卖部", "休息区", "寄存", "充电", "游客中心"],
+  safety: ["安全", "注意", "贴士", "tips", "防滑", "风大", "保暖", "防晒", "雨具", "高反", "海拔", "温差", "封路"],
+};
+
+/**
+ * 城市级检索主题。批量检索会按对象 key 顺序依次把各主题结果加入总阅读池；
+ * 阅读池满额后，后面的主题更难贡献新的 chunk。
+ * 城市主题偏向吃住行、备选点和整体风险提醒。
+ */
+export const CITY_THEMES = {
+  foods: ["美食", "好吃", "餐厅", "小吃", "夜市", "宵夜", "夜宵", "早餐", "早市", "烧烤", "火锅", "蔬菜", "咖啡", "奶茶", "特色菜", "本地人"],
+  lodging: ["住宿", "酒店", "民宿", "客栈", "青旅", "位置", "商圈", "隔音", "性价比"],
+  transport: ["停车", "路况", "导航", "限行", "交通", "自驾", "高铁", "大巴", "包车", "打车", "拼车", "公交"],
+  backup_places: ["景点", "观景台", "打卡点", "冷门", "小众", "顺路", "附近", "周边", "文创", "手信", "伴手礼" , "带娃"],
+  notes: ["风险", "注意", "安全", "贴士", "tips", "天气", "海拔", "温差", "高反", "绕路", "限流", "堵车", "物价", "宰客", "预约", "关门"],
+};
+
+/**
+ * 城市检索中，命中目标城市但同时绑定具体 `candidate_places` 的地点级 chunk 软惩罚。
+ *
+ * `backup_places` 主题用于寻找“有城市归属但没有具体地点归属”的城市级备选信息，
+ * 因此对地点级 chunk 扣分最重；未知城市主题使用默认值，避免地点级 chunk 在泛城市
+ * 查询中挤占城市级吃住行和风险材料。
+ */
+export const DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT = -0.12;
+export const CITY_PLACE_SPECIFIC_PENALTY_BY_THEME = {
+  foods: -0.115,
+  lodging: -0.18,
+  transport: -0.12,
+  notes: -0.12,
+  backup_places: -0.3,
+};
+
+export const RAG_RETRIEVAL_DEFAULTS = {
+  // 正式生成：每个景点的每个 theme 最多拿多少条 chunk。
+  // 对应 CLI: --place-top-k；输出字段仍叫 retrieval.place_top_k。
+  placeMaxThemeChunks: 5,
+
+  // 正式生成：每个城市的每个 theme 最多拿多少条 chunk。
+  // 对应 CLI: --city-top-k；输出字段仍叫 retrieval.city_top_k。
+  cityMaxThemeChunks: 5,
+
+  // 正式生成：一个景点所有 themes 合起来最多读多少条 chunk。
+  // 对应 CLI: --max-place-chunks。
+  maxPlaceChunks: 50,
+
+  // 正式生成：一个城市所有 themes 合起来最多读多少条 chunk。
+  // 对应 CLI: --max-city-chunks。
+  maxCityChunks: 25,
+
+  // keyword_match 计分时最多按多少个命中词归一化；提高会让多词命中更难满分。
+  keywordScoreTermCap: 6,
+
+  // retrieval_health 判定景点召回偏少的阈值；低于该值会给 weak warning，不会直接过滤结果。
+  minHealthyPlaceChunks: 3,
+
+  // retrieval_health 判定城市召回偏少的阈值；低于该值会给 weak warning，不会直接过滤结果。
+  minHealthyCityChunks: 2,
+
+  // 仅调试：手动运行 rag:retrieve 且没传 --top-k 时，默认显示多少条 chunk。
+  // 正式生成走 rag:workspace，不看这个值。
+  ragRetrieveResultChunks: 8,
+};

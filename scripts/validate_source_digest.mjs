@@ -4,6 +4,7 @@ import path from "node:path";
 
 const TARGET_TYPES = new Set(["place", "city", "day", "global", "confirmation"]);
 const DAY_FIELDS = new Set(["notes", "confirmations"]);
+const SCALAR_FACT_FIELDS = new Set(["elevation_m", "elevation_source_url", "elevation_checked_at"]);
 
 function parseArgs(argv) {
   const args = {
@@ -40,6 +41,10 @@ function text(value) {
   return String(value ?? "").trim();
 }
 
+function numericText(value) {
+  return text(value).replace(/,/g, "").match(/-?\d+(?:\.\d+)?/)?.[0] ?? "";
+}
+
 function nonEmptyArray(value) {
   return Array.isArray(value) && value.length > 0;
 }
@@ -62,17 +67,29 @@ function collectArrayFields(object) {
   return fields;
 }
 
+function collectScalarFields(object) {
+  const fields = new Set();
+  for (const field of SCALAR_FACT_FIELDS) {
+    if (Object.hasOwn(object ?? {}, field)) fields.add(field);
+  }
+  return fields;
+}
+
 function buildFactsLookup(facts) {
   const places = new Set(Object.keys(facts.places ?? {}));
   const cities = new Set(Object.keys(facts.cities ?? {}));
   const placeFields = {};
   const cityFields = {};
+  const placeScalarFields = {};
+  const cityScalarFields = {};
 
   for (const [name, data] of Object.entries(facts.places ?? {})) {
     placeFields[name] = collectArrayFields(data);
+    placeScalarFields[name] = collectScalarFields(data);
   }
   for (const [name, data] of Object.entries(facts.cities ?? {})) {
     cityFields[name] = collectArrayFields(data);
+    cityScalarFields[name] = collectScalarFields(data);
   }
 
   const days = new Map();
@@ -83,7 +100,7 @@ function buildFactsLookup(facts) {
     }
   }
 
-  return { places, cities, placeFields, cityFields, days };
+  return { places, cities, placeFields, cityFields, placeScalarFields, cityScalarFields, days };
 }
 
 function countDigestFacts(facts) {
@@ -146,21 +163,27 @@ function validateFact(fact, context) {
   if (!nonEmptyArray(fact.items)) {
     errors.push({ location, message: "fact.items must be a non-empty array" });
   } else {
+    if (SCALAR_FACT_FIELDS.has(field) && fact.items.length !== 1) {
+      errors.push({ location, message: `scalar fact field ${field} must have exactly one item` });
+    }
     for (const [itemIndex, item] of fact.items.entries()) {
       if (!text(item)) errors.push({ location, message: `fact.items[${itemIndex}] is empty` });
+      if (field === "elevation_m" && !numericText(item)) {
+        errors.push({ location, message: `fact.items[${itemIndex}] for elevation_m must include a numeric value` });
+      }
     }
   }
 
   if (targetType === "place") {
     if (!lookup.places.has(targetName)) {
       errors.push({ location, message: `unknown place target_name: ${targetName || "(empty)"}` });
-    } else if (!lookup.placeFields[targetName]?.has(field)) {
+    } else if (!lookup.placeFields[targetName]?.has(field) && !lookup.placeScalarFields[targetName]?.has(field)) {
       errors.push({ location, message: `unsupported place field: places.${targetName}.${field}` });
     }
   } else if (targetType === "city") {
     if (!lookup.cities.has(targetName)) {
       errors.push({ location, message: `unknown city target_name: ${targetName || "(empty)"}` });
-    } else if (!lookup.cityFields[targetName]?.has(field)) {
+    } else if (!lookup.cityFields[targetName]?.has(field) && !lookup.cityScalarFields[targetName]?.has(field)) {
       errors.push({ location, message: `unsupported city field: cities.${targetName}.${field}` });
     }
   } else if (targetType === "day") {

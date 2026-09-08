@@ -1,0 +1,862 @@
+#!/usr/bin/env node
+
+/**
+ * RAG 单点检索脚本主流程：
+ * 1. 解析 CLI 参数，确定索引路径、检索对象（景点/城市/自由 query）、主题、返回数量、embedding 和日志配置。
+ * 2. 加载并规范化 RAG 索引，兼容新版 `rag-index.json` 和旧版 JSONL chunks。
+ * 3. 构造本次检索的文本信号：
+ *    3.1 根据景点/城市名称生成实体别名，用于匹配标题、来源路径和正文中的不同写法。
+ *    3.2 根据实体类型和 theme 找到对应主题词；未知 theme 会直接作为关键词使用。
+ *    3.3 拆分自由 query，提取可参与关键词命中的查询词。
+ *    3.4 合并主题词、自由查询词和实体别名，形成用于 keyword score 的关键词集合。
+ *    3.5 合并实体名、主题词和自由 query，拼出用于 embedding API 的检索 query。
+ * 4. 在可用时调用 embedding API 生成 query 向量；否则退回到纯关键词、实体和标题来源打分。
+ * 5. 对索引中的每个 chunk 逐条召回和排序：
+ *    5.1 先执行实体 gate：景点检索要求 candidate_places 匹配，城市检索要求 candidate_cities 匹配。
+ *    5.2 对通过 gate 的 chunk 计算关键词、实体、标题/来源、embedding、来源惩罚和城市地点级惩罚信号。
+ *    5.3 根据是否有 query 向量、是否有实体目标和城市主题选择评分权重，并计算综合总分。
+ *    5.4 过滤掉未通过 gate 或总分为 0 的 chunk，得到候选结果。
+ *    5.5 城市检索把地点级 chunk 作为软 penalty 纳入总分；排序主要看总分，同分时偏向城市级 chunk。
+ *    5.6 按 topK 截断，生成最终返回的 results。
+ * 6. 按参数输出 JSON 或终端短预览；如指定 `--log`，额外写出可解释的召回与评分诊断日志。
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { placeAliases, relatedPlaceName } from "../place_name_utils.mjs";
+import {
+  CITY_PLACE_SPECIFIC_PENALTY_BY_THEME,
+  CITY_THEMES,
+  DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT,
+  PLACE_THEMES,
+  RAG_RETRIEVAL_DEFAULTS,
+} from "./rag_retrieval_config.mjs";
+
+export { CITY_THEMES, PLACE_THEMES };
+
+const VIDEO_CHUNK_PENALTY_WEIGHT = -0.15;
+
+/**
+ * 流程 1：解析单点检索命令参数。`--theme` 可重复传入；未传时只按实体或 query 检索。
+ */
+function parseArgs(argv) {
+  const args = {
+    ragIndex: "",
+    place: "",
+    city: "",
+    query: "",
+    themes: [],
+    topK: RAG_RETRIEVAL_DEFAULTS.ragRetrieveResultChunks,
+    embeddingUrl: "",
+    embeddingModel: "",
+    noEmbedding: false,
+    log: "",
+    json: false,
+  };
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--rag-index") args.ragIndex = argv[++i];
+    else if (arg === "--place") args.place = argv[++i];
+    else if (arg === "--city") args.city = argv[++i];
+    else if (arg === "--query") args.query = argv[++i];
+    else if (arg === "--theme") args.themes.push(argv[++i]);
+    else if (arg === "--top-k") args.topK = Number(argv[++i]);
+    else if (arg === "--embedding-url") args.embeddingUrl = argv[++i];
+    else if (arg === "--embedding-model") args.embeddingModel = argv[++i];
+    else if (arg === "--no-embedding") args.noEmbedding = true;
+    else if (arg === "--log") args.log = argv[++i];
+    else if (arg === "--json") args.json = true;
+    else throw new Error(`Unexpected argument: ${arg}`);
+  }
+
+  if (!args.ragIndex) throw new Error("Missing required --rag-index <path>.");
+  if (!args.place && !args.city && !args.query) {
+    throw new Error("At least one of --place, --city, or --query is required.");
+  }
+  if (args.place && args.city) throw new Error("Use either --place or --city for entity retrieval, not both.");
+  if (!Number.isFinite(args.topK) || args.topK <= 0) throw new Error("--top-k must be a positive number.");
+  return args;
+}
+
+/**
+ * 通用辅助：把空值、单值或数组统一规范成数组，兼容不同索引生成器输出。
+ */
+function asList(value) {
+  if (value === null || value === undefined || value === "") return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * 通用辅助：清理并去重字符串数组，保留第一次出现的顺序。
+ */
+function uniqueStrings(values) {
+  const result = [];
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text && !result.includes(text)) result.push(text);
+  }
+  return result;
+}
+
+/**
+ * 流程 2.1：读取旧版 JSONL chunks。主流程使用 `rag-index.json`，这里保留兼容能力。
+ */
+function readJsonl(filePath) {
+  return fs
+    .readFileSync(filePath, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      try {
+        return JSON.parse(line);
+      } catch (error) {
+        throw new Error(`Invalid JSONL at line ${index + 1}: ${error.message}`);
+      }
+    });
+}
+
+/**
+ * 流程 2.2：把 chunk 规范成检索内部结构。`resource_path` 只供内部匹配，不写入检索结果。
+ */
+function normalizeRawJsonlRow(row, index) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  const sourceUri = String(metadata.source_uri ?? row.source_uri ?? row.path ?? `inline-${String(index + 1).padStart(4, "0")}`).trim();
+  const resourcePath = String(row.path ?? sourceUri.replace(/^\.?\/*resources\//, ""));
+  return {
+    chunk_id: String(row.chunk_id ?? `${sourceUri}#note`),
+    source_uri: sourceUri,
+    resource_path: resourcePath,
+    kind: String(row.kind ?? metadata.kind ?? ""),
+    title: String(row.title ?? metadata.title ?? sourceUri),
+    text: String(row.text ?? ""),
+    candidate_places: uniqueStrings(asList(row.candidate_places)),
+    candidate_cities: uniqueStrings(asList(row.candidate_cities)),
+    metadata,
+    embedding: Array.isArray(row.embedding) ? row.embedding : [],
+  };
+}
+
+/**
+ * 流程 2：加载 RAG 索引。支持新版 `rag-index.json`，也兼容旧版逐行 JSONL。
+ */
+export function loadRagIndex(ragIndexPath) {
+  const raw = fs.readFileSync(ragIndexPath, "utf8").trim();
+  if (!raw) throw new Error(`RAG index is empty: ${ragIndexPath}`);
+  if (raw.startsWith("{")) {
+    const parsed = JSON.parse(raw);
+    return {
+      ...parsed,
+      chunks: asList(parsed.chunks).map((chunk, index) => normalizeRawJsonlRow(chunk, index)),
+    };
+  }
+  const chunks = readJsonl(ragIndexPath).map((row, index) => normalizeRawJsonlRow(row, index));
+  return {
+    schema_version: 1,
+    resource_root: path.dirname(path.resolve(ragIndexPath)),
+    source_chunks: path.resolve(ragIndexPath),
+    embedding: {
+      provider: "unknown",
+      model: "unknown",
+      dimensions: chunks.find((chunk) => chunk.embedding.length)?.embedding.length ?? 0,
+    },
+    chunks,
+  };
+}
+
+/**
+ * 流程 3.2：根据 entity 类型和 theme 名称取主题词；未知 theme 直接当作关键词使用。
+ */
+function themeTerms(entityType, theme) {
+  if (!theme) return [];
+  const map = entityType === "city" ? CITY_THEMES : PLACE_THEMES;
+  return map[theme] ? [...map[theme]] : [theme];
+}
+
+/**
+ * 流程 3.3：把自由查询拆成关键词，参与 keyword score。
+ */
+function queryTerms(query) {
+  return String(query ?? "")
+    .split(/[\s,，、;；|/]+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2);
+}
+
+/**
+ * 流程 3.1：生成景点/城市别名，用于标题、source_uri 和正文中的宽松实体匹配。
+ */
+function entityAliases(entity) {
+  if (!entity?.name) return [];
+  if (entity.type === "place") return placeAliases(entity.name);
+  return uniqueStrings([entity.name, ...placeAliases(entity.name)]);
+}
+
+/**
+ * 流程 5.2：计算主题词和查询词命中分。只匹配标题和正文。
+ *
+ * terms 来自 themeTerms(theme)、queryTerms(query) 和实体别名。
+ * 每命中一个词累加一次，分母最多按 6 个词计；命中 6 个及以上会封顶为 1。
+ */
+function keywordScore(chunk, terms) {
+  if (!terms.length) return 0;
+  const haystack = `${chunk.title}\n${chunk.text}`;
+  let hits = 0;
+  for (const term of terms) {
+    if (haystack.includes(term)) hits += 1;
+  }
+  return Math.min(1, hits / Math.min(terms.length, RAG_RETRIEVAL_DEFAULTS.keywordScoreTermCap));
+}
+
+/**
+ * 流程 5.2：计算实体命中分。结构化 candidate 命中最高，标题/source/text 里的别名命中次之。
+ */
+function entityScore(chunk, entity, aliases) {
+  if (!entity?.name) return 0;
+  if (entity.type === "place") {
+    if (candidatePlaceMatched(chunk, entity.name)) return 1;
+    const haystack = `${chunk.title}\n${chunk.source_uri}\n${chunk.resource_path}\n${chunk.text}`;
+    if (aliases.some((alias) => haystack.includes(alias))) return 0.75;
+    return 0;
+  }
+  if (candidateCityMatched(chunk, entity.name)) return 1;
+  const haystack = `${chunk.title}\n${chunk.source_uri}\n${chunk.resource_path}\n${chunk.text}`;
+  if (aliases.some((alias) => haystack.includes(alias))) return 0.75;
+  return 0;
+}
+
+/**
+ * 流程 5.2：计算标题和来源 URI 命中分，用于把明显同名的 note 往前排。
+ */
+function titleSourceScore(chunk, aliases) {
+  if (!aliases.length) return 0;
+  const haystack = `${chunk.title}\n${chunk.source_uri}\n${chunk.resource_path}`;
+  if (aliases.some((alias) => haystack.includes(alias))) return 1;
+  return 0;
+}
+
+/**
+ * 流程 5.2：记录该结果是被哪些信号召回的，方便人工检查排序原因。
+ */
+function matchedBy(chunk, entity, aliases, terms) {
+  const matches = [];
+  const candidateMatched = entity?.type === "place" && candidatePlaceMatched(chunk, entity.name);
+  const cityMatched = entity?.type === "city" && candidateCityMatched(chunk, entity.name);
+  const titleSourceMatched = titleSourceScore(chunk, aliases) > 0;
+  const keywordMatched = keywordScore(chunk, terms) > 0;
+  const textEntityMatched = entityScore(chunk, entity, aliases) > 0 && !candidateMatched && !cityMatched && !titleSourceMatched;
+
+  if (candidateMatched) matches.push("candidate_places");
+  if (cityMatched) matches.push("candidate_cities");
+  if (titleSourceMatched) matches.push("title_source");
+  if (textEntityMatched) matches.push("text_entity");
+  if (keywordMatched) matches.push("keyword");
+  return matches;
+}
+
+/**
+ * 流程 4：判断 chunk 是否有可参与余弦相似度计算的向量。
+ */
+function hasEmbedding(chunk) {
+  return Array.isArray(chunk.embedding) && chunk.embedding.length > 0;
+}
+
+/**
+ * 流程 4：判断是否应该为本次检索调用 embedding API。
+ */
+function shouldUseEmbeddings(index, options) {
+  if (options.noEmbedding) return false;
+  return asList(index.chunks).some(hasEmbedding);
+}
+
+/**
+ * 流程 4：返回第一个非空配置值，避免 CLI 默认空字符串遮住环境变量或索引元数据。
+ */
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+/**
+ * 流程 4：从环境变量和索引元数据中整理 embedding API 配置。
+ */
+function embeddingConfig(index, options) {
+  const model = firstNonEmpty(
+    options.embeddingModel,
+    process.env.RAG_EMBEDDING_MODEL,
+    process.env.EMBEDDING_MODEL,
+    index.embedding?.model,
+  );
+  const url = firstNonEmpty(
+    options.embeddingUrl,
+    process.env.RAG_EMBEDDING_URL,
+    process.env.EMBEDDING_API_URL,
+    "http://localhost:11434/api/embed",
+  );
+  const apiKey = firstNonEmpty(
+    options.embeddingApiKey,
+    process.env.RAG_EMBEDDING_API_KEY,
+    process.env.EMBEDDING_API_KEY,
+    process.env.OPENAI_API_KEY,
+  );
+
+  if (!url) throw new Error("Embedding is enabled, but no embedding API URL is configured.");
+  if (!model || model === "unknown") {
+    throw new Error(
+      "Embedding is enabled, but no embedding model is configured. Use --embedding-model or RAG_EMBEDDING_MODEL.",
+    );
+  }
+  return { url, model, apiKey };
+}
+
+/**
+ * 流程 4：把不同 embedding API 的响应统一成单条数值向量。
+ *
+ * 支持 Ollama `/api/embed` 的 `{ embeddings: [[...]] }`，旧 `/api/embeddings`
+ * 的 `{ embedding: [...] }`，以及 OpenAI-compatible `{ data: [{ embedding }] }`。
+ */
+function parseEmbeddingResponse(payload) {
+  const vector =
+    (Array.isArray(payload?.embeddings) && payload.embeddings[0]) ||
+    (Array.isArray(payload?.embedding) && payload.embedding) ||
+    (Array.isArray(payload?.data) && payload.data[0]?.embedding) ||
+    (Array.isArray(payload) && payload);
+  if (!Array.isArray(vector) || !vector.length) {
+    throw new Error("Embedding API response did not contain an embedding vector.");
+  }
+  const parsed = vector.map((value) => Number(value));
+  if (parsed.some((value) => !Number.isFinite(value))) {
+    throw new Error("Embedding API response contained non-numeric vector values.");
+  }
+  return parsed;
+}
+
+/**
+ * 流程 4：调用真实 embedding API 为检索 query 生成向量。
+ */
+async function fetchEmbedding(input, config) {
+  const headers = { "content-type": "application/json" };
+  if (config.apiKey) headers.authorization = `Bearer ${config.apiKey}`;
+  const response = await fetch(config.url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: config.model, input }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Embedding API request failed: ${response.status} ${response.statusText}${body ? ` - ${body}` : ""}`);
+  }
+  return parseEmbeddingResponse(await response.json());
+}
+
+/**
+ * 流程 4：注入式 embedding client 便于测试；生产默认走 fetchEmbedding。
+ */
+async function queryEmbedding(index, query, options) {
+  if (!shouldUseEmbeddings(index, options)) return [];
+  if (!query.trim()) return [];
+  if (options.queryEmbedding) return parseEmbeddingResponse(options.queryEmbedding);
+  if (options.embeddingClient) {
+    return parseEmbeddingResponse(await options.embeddingClient(query, embeddingConfig(index, options)));
+  }
+  return fetchEmbedding(query, embeddingConfig(index, options));
+}
+
+/**
+ * 流程 5.2：计算余弦相似度。返回 0..1 的非负分，避免负相关结果仅因向量项进入召回。
+ */
+function cosineScore(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || !left.length || left.length !== right.length) return 0;
+  let dot = 0;
+  let leftNorm = 0;
+  let rightNorm = 0;
+  for (let i = 0; i < left.length; i += 1) {
+    const a = Number(left[i]);
+    const b = Number(right[i]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+    dot += a * b;
+    leftNorm += a * a;
+    rightNorm += b * b;
+  }
+  if (!leftNorm || !rightNorm) return 0;
+  return Math.max(0, dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm)));
+}
+
+/**
+ * 通用辅助：保持日志中的小数稳定，避免浮点尾数干扰 diff。
+ */
+function round4(value) {
+  return Number(Number(value).toFixed(4));
+}
+
+/**
+ * 流程 5.2：判断 chunk 是否来自视频素材。优先看结构化 kind/metadata，路径和标题只作为兜底线索。
+ */
+function isVideoChunk(chunk) {
+  const values = [
+    chunk.kind,
+    chunk.metadata?.kind,
+    chunk.metadata?.source_kind,
+    chunk.metadata?.source_type,
+    chunk.metadata?.media_type,
+    chunk.source_uri,
+    chunk.resource_path,
+    chunk.title,
+  ];
+  return values.some((value) => /(^|[-_\s/])video($|[-_\s/.])|视频/i.test(String(value ?? "")));
+}
+
+/**
+ * 流程 5.3：城市检索时，命中城市但绑定具体景点的 chunk 使用软 penalty。
+ *
+ * 城市主题里的 `backup_places` 用来找没有具体地点归属的城市级备选信息，因此扣分最重；
+ * 未知主题按默认城市 penalty 处理，避免地点级 chunk 在城市级查询中过度占据候选排序。
+ */
+function cityPlaceSpecificPenaltyWeight(entity, theme) {
+  if (entity?.type !== "city") return 0;
+  if (Object.hasOwn(CITY_PLACE_SPECIFIC_PENALTY_BY_THEME, theme)) {
+    return CITY_PLACE_SPECIFIC_PENALTY_BY_THEME[theme];
+  }
+  return DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT;
+}
+
+/**
+ * 流程 5.2：判断城市检索结果是否是绑定具体景点的地点级 chunk。
+ *
+ * `candidate_cities` 仍然负责确认归属；这里只在已归属城市的 chunk 同时存在
+ * `candidate_places` 时记 1，后续通过负权重降低排序分，而不是直接压到城市级 chunk 后面。
+ */
+function cityPlaceSpecificPenaltySignal(chunk, entity) {
+  if (entity?.type !== "city") return 0;
+  return candidateCityMatched(chunk, entity.name) && chunk.candidate_places.length > 0 ? 1 : 0;
+}
+
+/**
+ * 流程 5.3：根据是否启用 query embedding、是否有实体目标和城市主题选择评分权重。
+ */
+function scoreWeights(hasQueryVector, entity, theme) {
+  const cityPlaceSpecificPenalty = cityPlaceSpecificPenaltyWeight(entity, theme);
+  if (hasQueryVector) {
+    return entity?.name
+      ? {
+          profile: "entity_query_embedding",
+          weights: {
+            query_embedding_similarity: 0.6,
+            keyword_match: 0.2,
+            route_entity_match: 0.15,
+            title_source_match: 0.05,
+            video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
+            city_place_specific_penalty: cityPlaceSpecificPenalty,
+          },
+        }
+      : {
+          profile: "query_only_embedding",
+          weights: {
+            query_embedding_similarity: 0.7,
+            keyword_match: 0.25,
+            title_source_match: 0.05,
+            video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
+          },
+        };
+  }
+  return entity?.name
+    ? {
+        profile: "entity_query_keyword",
+        weights: {
+          keyword_match: 0.55,
+          route_entity_match: 0.35,
+          title_source_match: 0.1,
+          video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
+          city_place_specific_penalty: cityPlaceSpecificPenalty,
+        },
+      }
+    : {
+        profile: "query_only_keyword",
+        weights: {
+          keyword_match: 0.8,
+          title_source_match: 0.2,
+          video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
+        },
+      };
+}
+
+/**
+ * 流程 5.3：展开每个评分分项对总分的贡献，供调试日志复盘。
+ */
+function scoreBreakdown(signals, scoring) {
+  const contributions = {};
+  let total = 0;
+  for (const [name, weight] of Object.entries(scoring.weights)) {
+    const contribution = (signals[name] ?? 0) * weight;
+    contributions[name] = round4(contribution);
+    total += contribution;
+  }
+  return {
+    profile: scoring.profile,
+    weights: scoring.weights,
+    signals: Object.fromEntries(Object.entries(signals).map(([key, value]) => [key, round4(value)])),
+    contributions,
+    total: round4(total),
+  };
+}
+
+/**
+ * 流程 5.6：输出面向 agent 阅读的检索结果；不暴露内部派生字段。
+ */
+function resultForChunk(chunk, score, matches) {
+  return {
+    chunk_id: chunk.chunk_id,
+    source_uri: chunk.source_uri,
+    title: chunk.title,
+    score: round4(score),
+    matched_by: matches,
+    candidate_places: chunk.candidate_places,
+    candidate_cities: chunk.candidate_cities,
+    text: chunk.text,
+  };
+}
+
+/**
+ * 流程 5.2-5.3：综合评分。
+ *
+ * 评分规则：
+ * 1. 先为 chunk 计算六个信号分：
+ *    - keyword_match：主题词、自由查询词或实体别名命中标题或正文的比例。
+ *    - route_entity_match：candidate_places/candidate_cities 或标题、来源、正文中的实体别名命中。
+ *    - title_source_match：实体别名是否命中标题、source_uri 或 resource_path。
+ *    - query_embedding_similarity：query 向量和 chunk.embedding 的非负余弦相似度。
+ *    - video_source_penalty：视频来源 chunk 记为 1，非视频记为 0；该信号使用负权重降低视频素材排序。
+ *    - city_place_specific_penalty：城市检索下，绑定具体景点的 chunk 记为 1；按 theme 选择负权重软降级。
+ * 2. 再根据是否有 queryVector、是否有实体目标和城市 theme 选择权重 profile。
+ * 3. 总分 = 每个信号分 * 对应权重后求和，并通过 scoreBreakdown 保留 contributions 供日志解释。
+ * 4. matched_by 只记录参与召回/排序的命中信号；embedding 相似度大于 0 时额外标记 embedding。
+ */
+function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
+  // 计算 keyword_match：主题词、自由 query 词和实体别名在标题、正文中的命中比例。
+  const keyword = keywordScore(chunk, terms);
+  // 计算 route_entity_match：优先看结构化 candidate 命中，其次看标题、来源、正文里的实体别名命中。
+  const routeEntity = entityScore(chunk, entity, aliases);
+  // 计算 title_source_match：实体别名命中标题、source_uri 或 resource_path 时给满分。
+  const titleSource = titleSourceScore(chunk, aliases);
+  // 计算 query_embedding_similarity：queryVector 与 chunk.embedding 的非负余弦相似度。
+  const embedding = cosineScore(queryVector, chunk.embedding);
+  // 计算 video_source_penalty：视频 chunk 记为 1，后续乘以负权重，降低但不直接剔除。
+  const videoPenalty = isVideoChunk(chunk) ? 1 : 0;
+  // 计算 city_place_specific_penalty：城市检索时，绑定具体景点的 chunk 软降级。
+  const cityPlaceSpecificPenalty = cityPlaceSpecificPenaltySignal(chunk, entity);
+  // 汇总原始信号分，字段名会和 scoreWeights() 返回的权重名一一对应。
+  const signals = {
+    query_embedding_similarity: embedding,
+    keyword_match: keyword,
+    route_entity_match: routeEntity,
+    title_source_match: titleSource,
+    video_source_penalty: videoPenalty,
+    city_place_specific_penalty: cityPlaceSpecificPenalty,
+  };
+  // 按“是否有向量、是否有实体目标和城市 theme”选择权重，并计算各分项贡献与最终总分。
+  const breakdown = scoreBreakdown(signals, scoreWeights(queryVector.length > 0, entity, theme));
+  // 生成 matched_by，供结果和诊断日志解释这个 chunk 是被哪些信号命中的。
+  const matches = matchedBy(chunk, entity, aliases, terms);
+  // embedding 相似度只要大于 0，就把 embedding 也记录为命中信号。
+  if (embedding > 0) matches.push("embedding");
+  return {
+    score: breakdown.total,
+    matches,
+    breakdown,
+  };
+}
+
+/**
+ * 流程 5.1：判断 chunk 是否被上游明确标注为目标地点。
+ */
+function candidatePlaceMatched(chunk, placeName) {
+  return chunk.candidate_places.some((place) => relatedPlaceName(placeName, place));
+}
+
+/**
+ * 流程 5.1：判断 chunk 是否被上游明确标注为目标城市。
+ */
+function candidateCityMatched(chunk, cityName) {
+  return chunk.candidate_cities.includes(cityName);
+}
+
+/**
+ * 流程 5.1：实体检索必须先确认 chunk 归属；主题词只负责在已归属材料里排序。
+ */
+function passesEntityGate(chunk, entity) {
+  if (!entity?.name) return true;
+  if (entity.type === "place") return candidatePlaceMatched(chunk, entity.name);
+  if (entity.type === "city") return candidateCityMatched(chunk, entity.name);
+  return false;
+}
+
+/**
+ * 流程 5.1：记录实体 gate 的具体原因，便于解释 chunk 为什么没有进入候选池。
+ */
+function entityGate(chunk, entity) {
+  if (!entity?.name) return { passed: true, reason: "query_only_no_entity_gate" };
+  if (entity.type === "place") {
+    return candidatePlaceMatched(chunk, entity.name)
+      ? { passed: true, reason: "candidate_places_match" }
+      : { passed: false, reason: "candidate_places_miss" };
+  }
+  if (entity.type === "city") {
+    return candidateCityMatched(chunk, entity.name)
+      ? { passed: true, reason: "candidate_cities_match" }
+      : { passed: false, reason: "candidate_cities_miss" };
+  }
+  return { passed: false, reason: "unknown_entity_type" };
+}
+
+/**
+ * 流程 5.5：判断城市检索同分时是否更偏向城市级 chunk。
+ *
+ * 主排序已经通过 `city_place_specific_penalty` 软降级地点级 chunk；这里仅作为同分
+ * tie-breaker，避免完全相同分数时地点级素材随机压过城市级素材。
+ */
+function cityLevelPriority(result, entity) {
+  if (entity?.type !== "city") return 0;
+  return result.matched_by.includes("candidate_cities") && result.candidate_places.length === 0 ? 1 : 0;
+}
+
+/**
+ * 流程 5.5：按总分和命中信号数量排序，供通用检索使用。
+ */
+function compareResults(left, right) {
+  return (
+    right.score - left.score ||
+    right.matched_by.length - left.matched_by.length
+  );
+}
+
+/**
+ * 流程 5.5：稳定排序兜底，避免多次运行产生不必要的 JSON diff。
+ */
+function compareStableFields(left, right) {
+  return (
+    left.source_uri.localeCompare(right.source_uri, "zh-CN") ||
+    left.chunk_id.localeCompare(right.chunk_id, "zh-CN")
+  );
+}
+
+/**
+ * 流程 5.5：排序候选结果。
+ *
+ * 所有检索都先按总分和命中信号数量排序；城市检索只在这些排序条件相同的时候，
+ * 再偏向没有绑定具体景点的城市级 chunk。
+ */
+function compareResultsForEntity(left, right, entity) {
+  return (
+    compareResults(left, right) ||
+    cityLevelPriority(right, entity) - cityLevelPriority(left, entity) ||
+    compareStableFields(left, right)
+  );
+}
+
+/**
+ * 流程 6：日志只记录向量可解释摘要，不复制完整 embedding 数组，避免文件过大。
+ */
+function vectorTrace(queryVector, chunk, similarity) {
+  return {
+    used: queryVector.length > 0,
+    query_dimensions: queryVector.length,
+    chunk_dimensions: Array.isArray(chunk.embedding) ? chunk.embedding.length : 0,
+    chunk_has_embedding: hasEmbedding(chunk),
+    cosine_similarity: round4(similarity),
+  };
+}
+
+/**
+ * 流程 6：为单个 chunk 生成调试日志项。
+ */
+function diagnosticForRow(row, selectedIds, eligibleRanks) {
+  let recallStatus = "filtered_by_entity_gate";
+  if (row.gate.passed && row.result.score <= 0) recallStatus = "zero_score";
+  else if (selectedIds.has(row.chunk.chunk_id)) recallStatus = "selected";
+  else if (row.gate.passed) recallStatus = "scored_not_selected";
+
+  return {
+    chunk_id: row.chunk.chunk_id,
+    source_uri: row.chunk.source_uri,
+    title: row.chunk.title,
+    gate: row.gate,
+    recall_status: recallStatus,
+    candidate_rank: eligibleRanks.get(row.chunk.chunk_id) ?? null,
+    selected_rank: recallStatus === "selected" ? [...selectedIds].indexOf(row.chunk.chunk_id) + 1 : null,
+    matched_by: row.result.matched_by,
+    vector_match: vectorTrace(row.queryVector, row.chunk, row.scored.breakdown.signals.query_embedding_similarity),
+    score: row.scored.breakdown,
+    candidate_places: row.chunk.candidate_places,
+    candidate_cities: row.chunk.candidate_cities,
+  };
+}
+
+/**
+ * 流程 6：生成单次 retrieve() 的完整调试日志。
+ */
+function retrievalDiagnostics({ index, query, entity, theme, aliases, terms, queryVector, topK, rows, selectedRows, rankedRows }) {
+  const selectedIds = new Set(selectedRows.map((row) => row.chunk.chunk_id));
+  const eligibleRanks = new Map(rankedRows.map((row, index) => [row.chunk.chunk_id, index + 1]));
+  return {
+    query,
+    entity,
+    theme: theme || null,
+    terms,
+    aliases,
+    top_k: topK,
+    index_chunk_count: asList(index.chunks).length,
+    query_embedding: {
+      used: queryVector.length > 0,
+      dimensions: queryVector.length,
+    },
+    chunks: rows.map((row) => diagnosticForRow(row, selectedIds, eligibleRanks)),
+  };
+}
+
+/**
+ * 流程 6：从 retrieve() 返回值中移除调试日志，避免普通 JSON 输出过大。
+ */
+function withoutDiagnostics(result) {
+  const { diagnostics, ...rest } = result;
+  return rest;
+}
+
+/**
+ * 流程 6：写出单点检索调试日志。
+ */
+export function writeRetrievalLog(logPath, payload) {
+  fs.mkdirSync(path.dirname(path.resolve(logPath)), { recursive: true });
+  fs.writeFileSync(logPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+/**
+ * 流程 2-5：检索入口，可被 CLI 和 `create_retrieval_workspace.mjs` 复用。
+ */
+export async function retrieve(indexOrPath, options = {}) {
+  const index = typeof indexOrPath === "string" ? loadRagIndex(indexOrPath) : indexOrPath;
+  const entity = options.place
+    ? { type: "place", name: String(options.place) }
+    : options.city
+      ? { type: "city", name: String(options.city) }
+      : null;
+  const theme = String(options.theme ?? "");
+  const aliases = entityAliases(entity);
+  const terms = uniqueStrings([...themeTerms(entity?.type, theme), ...queryTerms(options.query), ...aliases]);
+  const query = uniqueStrings([entity?.name, ...themeTerms(entity?.type, theme), options.query]).join(" ");
+  // 这里的 embedding API 只负责把本次 query 转成向量，不负责从索引里返回最相似的 chunk。
+  const queryVector = await queryEmbedding(index, query, options);
+  const topK = Number(options.topK ?? RAG_RETRIEVAL_DEFAULTS.ragRetrieveResultChunks);
+
+  // 本脚本没有接入向量数据库或 kNN 检索服务，因此仍需遍历本地 index.chunks。
+  // 普通检索会先跳过未通过 entity gate 的 chunk，避免给明显不相关的材料计算 embedding 相似度；
+  // 只有诊断日志需要解释所有 chunk 的召回状态时，才会继续为未通过 gate 的 chunk 生成完整评分明细。
+  const rows = [];
+  for (const chunk of index.chunks) {
+    const gate = entityGate(chunk, entity);
+    if (gate.passed !== passesEntityGate(chunk, entity)) {
+      throw new Error(`Internal entity gate mismatch for chunk: ${chunk.chunk_id}`);
+    }
+    if (!gate.passed && !options.includeDiagnostics) continue;
+
+    // 用 queryVector 和每个 chunk.embedding 计算相似度，再结合关键词、实体 gate 和标题/来源命中综合排序。
+    const scored = scoreChunk(chunk, entity, aliases, terms, queryVector, theme);
+    rows.push({
+      chunk,
+      gate,
+      scored,
+      queryVector,
+      result: resultForChunk(chunk, scored.score, scored.matches),
+    });
+  }
+  const rankedRows = rows
+    .filter((row) => row.gate.passed && row.result.score > 0)
+    .sort((left, right) => compareResultsForEntity(left.result, right.result, entity));
+  const selectedRows = rankedRows.slice(0, topK);
+  const results = selectedRows.map((row) => row.result);
+
+  const output = {
+    query,
+    entity,
+    theme: theme || null,
+    results,
+  };
+  if (options.includeDiagnostics) {
+    output.diagnostics = retrievalDiagnostics({
+      index,
+      query,
+      entity,
+      theme,
+      aliases,
+      terms,
+      queryVector,
+      topK,
+      rows,
+      selectedRows,
+      rankedRows,
+    });
+  }
+  return output;
+}
+
+/**
+ * 流程 6：非 JSON 模式下打印短预览，避免在终端输出过长素材。
+ */
+function printText(result) {
+  console.log(`${result.entity?.type ?? "query"}: ${result.entity?.name ?? result.query}`);
+  if (result.theme) console.log(`theme: ${result.theme}`);
+  for (const item of result.results) {
+    console.log(`\n[${item.score}] ${item.title} (${item.source_uri})`);
+    console.log(item.text.slice(0, 500).replace(/\s+/g, " "));
+  }
+}
+
+/**
+ * 流程 1-6：CLI 入口。支持一次传多个 `--theme`，JSON 模式下输出稳定结构。
+ */
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const themes = args.themes.length ? args.themes : [""];
+  const requests = [];
+  for (const theme of themes) {
+    requests.push(
+      await retrieve(args.ragIndex, {
+        place: args.place,
+        city: args.city,
+        query: args.query,
+        theme,
+        topK: args.topK,
+        embeddingUrl: args.embeddingUrl,
+        embeddingModel: args.embeddingModel,
+        noEmbedding: args.noEmbedding,
+        includeDiagnostics: Boolean(args.log),
+      }),
+    );
+  }
+  if (args.log) {
+    writeRetrievalLog(args.log, {
+      schema_version: 1,
+      source: {
+        rag_index: path.resolve(args.ragIndex),
+      },
+      request_count: requests.length,
+      requests: requests.map((request) => request.diagnostics),
+    });
+  }
+  const outputRequests = args.log ? requests.map(withoutDiagnostics) : requests;
+  const output = outputRequests.length === 1 ? outputRequests[0] : { requests: outputRequests };
+  if (args.json) console.log(JSON.stringify(output, null, 2));
+  else if (requests.length === 1) printText(requests[0]);
+  else for (const request of requests) printText(request);
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exit(1);
+  });
+}

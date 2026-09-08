@@ -68,14 +68,17 @@ function textList(value) {
 }
 
 /**
- * 将海拔字段转换成可展示的短句；缺失时不生成内容。
+ * 将海拔字段转换成可展示的列表项；超过 2500 米时标记为高海拔提醒。
  */
-function elevationText(data) {
+function elevationItem(data) {
   const elevation = data?.elevation_m;
-  if (elevation === null || elevation === undefined || elevation === "") return "";
+  if (elevation === null || elevation === undefined || elevation === "") return null;
   const numeric = Number(elevation);
   const value = Number.isFinite(numeric) ? Math.round(numeric) : String(elevation);
-  return `海拔约 ${value} 米。`;
+  return {
+    text: `海拔约 ${value} 米。`,
+    className: Number.isFinite(numeric) && numeric > 2500 ? "elevation-alert" : "",
+  };
 }
 
 /**
@@ -184,7 +187,7 @@ function preparePhotos(place, photos, resourceRoot, outDir) {
  */
 function preparePlace(name, data, resourceRoot, outDir) {
   const groups = [];
-  const elevation = elevationText(data);
+  const elevation = elevationItem(data);
   if (elevation) groups.push({ title: "海拔高度", items: [elevation] });
   for (const [title, key] of [
     ["看点", "highlights"],
@@ -277,7 +280,7 @@ function prepareDay(day, facts, resourceRoot, outDir, totalDays) {
  */
 function prepareCity(name, data) {
   const groups = [];
-  const elevation = elevationText(data);
+  const elevation = elevationItem(data);
   if (elevation) groups.push({ title: "海拔高度", items: [elevation] });
   for (const [title, key] of [
     ["备选景点库", "backup_places"],
@@ -307,7 +310,8 @@ function render(facts, outDir, skillRoot) {
     throw new Error(`Missing template stylesheet: ${cssSource}`);
   }
   fs.copyFileSync(cssSource, path.join(outDir, "reading-first.css"));
-  let resourceRoot = facts.source?.resource_root || ".";
+  const source = facts.source ?? {};
+  let resourceRoot = source.rag_index ? source.photo_resource_root || source.source_chunks || "." : source.resource_root || ".";
   if (!path.isAbsolute(resourceRoot)) resourceRoot = path.resolve(skillRoot, resourceRoot);
 
   fs.writeFileSync(path.join(outDir, "index.html"), renderTemplate(skillRoot, "index.ejs", prepareIndex(facts)), "utf8");
