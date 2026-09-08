@@ -58,10 +58,10 @@ function resolveRagPath(value, ragIndexPath) {
 }
 
 /**
- * RAG 分支的照片根目录只来自 source_chunks。
+ * RAG 分支的照片根目录固定为 rag-index.json 同级目录。
  */
-function photoResourceRootFromRag(ragIndex, ragIndexPath) {
-  return resolveRagPath(ragIndex.source_chunks, ragIndexPath);
+function photoResourceRootFromRag(ragIndexPath) {
+  return path.dirname(path.resolve(ragIndexPath));
 }
 
 /**
@@ -144,14 +144,15 @@ function indexFromRag(ragIndexPath) {
     filesByPath.set(sourcePath, existing);
   }
 
-  const resourceRoot = photoResourceRootFromRag(ragIndex, ragIndexPath);
+  const chunkSourceRoot = resolveRagPath(ragIndex.source_chunks, ragIndexPath);
+  const photoResourceRoot = photoResourceRootFromRag(ragIndexPath);
   return {
     source_kind: "rag-index",
     rag_index: path.basename(ragIndexPath),
-    source_chunks: resourceRoot,
+    source_chunks: chunkSourceRoot,
     resource_root: "",
     files: [...filesByPath.values()].sort((a, b) => a.path.localeCompare(b.path, "zh-CN")),
-    photos: scanPhotos(resourceRoot),
+    photos: scanPhotos(photoResourceRoot),
   };
 }
 
