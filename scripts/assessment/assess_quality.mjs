@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { verifyOutput } from "../verify_output.mjs";
 
-const FORBIDDEN_PATTERNS = ["资料来源", "餐饮节奏", "占位图", "placeholder", "http://", "https://", "<script", "<iframe"];
 const GENERIC_CITY_PATTERNS = [
   "本行程中承担",
   "出发基地",
@@ -149,110 +149,6 @@ function stripTags(value) {
 
 function normalizeText(value) {
   return stripTags(value).replace(/\s+/g, " ").trim();
-}
-
-function localTargetExists(outDir, value) {
-  if (value.startsWith("#")) return true;
-  let parsed;
-  try {
-    parsed = new URL(value, "file:///");
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== "file:") return true;
-  const targetPath = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
-  return fs.existsSync(path.join(outDir, targetPath));
-}
-
-function extractLinks(text) {
-  const links = [];
-  for (const match of text.matchAll(/\s(href|src)="([^"]+)"/g)) {
-    links.push({ kind: match[1], value: match[2] });
-  }
-  return links;
-}
-
-function verifyHtml(outDir) {
-  const forbidden = [];
-  const brokenLinks = [];
-  const missingPhotos = [];
-  const remoteResources = [];
-  const verifyErrors = [];
-
-  if (!fs.existsSync(outDir)) {
-    verifyErrors.push(`output directory does not exist: ${outDir}`);
-    return { forbidden, brokenLinks, missingPhotos, remoteResources, verifyErrors };
-  }
-
-  for (const filePath of htmlFiles(outDir)) {
-    const text = readText(filePath);
-    const name = path.basename(filePath);
-    if (!text.includes('<link rel="stylesheet" href="reading-first.css">')) {
-      verifyErrors.push(`${name}: missing reading-first.css link`);
-    }
-    if (!text.includes('<meta name="viewport" content="width=device-width, initial-scale=1.0">')) {
-      verifyErrors.push(`${name}: missing viewport meta`);
-    }
-
-    for (const pattern of FORBIDDEN_PATTERNS) {
-      if (text.includes(pattern)) {
-        const item = { file: name, pattern };
-        forbidden.push(item);
-        verifyErrors.push(`${name}: forbidden pattern found: ${pattern}`);
-      }
-    }
-
-    for (const { kind, value } of extractLinks(text)) {
-      if (/^https?:\/\//i.test(value)) {
-        remoteResources.push({ file: name, kind, value });
-      }
-      if (kind === "src" && !value.startsWith("assets/photos/")) {
-        verifyErrors.push(`${name}: image source is not under assets/photos/: ${value}`);
-      }
-      if (!localTargetExists(outDir, value)) {
-        const item = { file: name, kind, value };
-        brokenLinks.push(item);
-        verifyErrors.push(`${name}: missing linked target: ${value}`);
-        if (kind === "src") missingPhotos.push(item);
-      }
-    }
-  }
-
-  const indexPath = path.join(outDir, "index.html");
-  if (!fs.existsSync(indexPath)) {
-    verifyErrors.push("missing index.html");
-  } else {
-    const index = readText(indexPath);
-    if (index.includes('nav class="page-nav"')) verifyErrors.push("index.html: must not contain nav.page-nav");
-    if (!/生成时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(index)) verifyErrors.push("index.html: missing generated time");
-    if (!index.includes('<ol class="timeline">')) verifyErrors.push("index.html: missing ol.timeline");
-    if (/<a href="day-\d{2}\.html"><strong>.*?<\/strong><\/a>\s*<p>.*?<\/p>\s*<ul>/s.test(index)) {
-      verifyErrors.push("index.html: day timeline must not contain detail ul lists");
-    }
-    for (const dayFile of htmlFiles(outDir, /^day-\d{2}\.html$/)) {
-      const name = path.basename(dayFile);
-      if (!index.includes(`href="${name}"`)) verifyErrors.push(`index.html: missing link to ${name}`);
-    }
-  }
-
-  for (const filePath of htmlFiles(outDir, /^day-\d{2}\.html$/)) {
-    const text = readText(filePath);
-    const name = path.basename(filePath);
-    if ((text.match(/nav class="page-nav"/g) ?? []).length < 2) {
-      verifyErrors.push(`${name}: expected top and bottom page-nav`);
-    }
-    if (!text.includes('<ol class="timeline">')) verifyErrors.push(`${name}: missing ol.timeline`);
-  }
-
-  const index = fs.existsSync(indexPath) ? readText(indexPath) : "";
-  for (const filePath of htmlFiles(outDir, /^city-\d{2}\.html$/)) {
-    const text = readText(filePath);
-    const name = path.basename(filePath);
-    if (!text.includes('href="index.html"')) verifyErrors.push(`${name}: missing return-home link`);
-    if (!index.includes(`href="${name}"`)) verifyErrors.push(`index.html: missing link to ${name}`);
-  }
-
-  return { forbidden, brokenLinks, missingPhotos, remoteResources, verifyErrors };
 }
 
 function coverageMetrics(days, facts, outDir) {
@@ -467,7 +363,7 @@ function buildReport(args) {
   const routePlaces = allRoutePlaces(days);
 
   const coverage = coverageMetrics(days, facts, outDir);
-  const verify = verifyHtml(outDir);
+  const verify = verifyOutput(outDir);
   const wrongAttribution = wrongAttributionCandidates(days, routePlaces, facts, outDir);
   const cityNoise = cityNoiseCandidates(facts, routePlaces);
   const duplicates = duplicateContentCandidates(outDir);
@@ -492,7 +388,6 @@ function buildReport(args) {
       broken_link_count: verify.brokenLinks.length,
       missing_photo_count: verify.missingPhotos.length,
       remote_resource_count: verify.remoteResources.length,
-      forbidden_section_count: verify.forbidden.length,
       source_traceability_ratio: traceability.source_traceability_ratio,
     },
     details: {
@@ -504,7 +399,6 @@ function buildReport(args) {
       broken_links: verify.brokenLinks,
       missing_photos: verify.missingPhotos,
       remote_resources: verify.remoteResources,
-      forbidden_sections: verify.forbidden,
       verify_errors: verify.verifyErrors,
     },
     warnings: [

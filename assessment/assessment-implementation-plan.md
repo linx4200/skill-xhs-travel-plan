@@ -135,7 +135,6 @@ node scripts/assessment/assess_quality.mjs \
 - `broken_link_count`
 - `missing_photo_count`
 - `remote_resource_count`
-- `forbidden_section_count`
 - `source_traceability_ratio`
 
 注意：这一步只输出结构性指标和候选风险，不宣称产物事实正确。脚本生成的 `wrong_attribution_candidate_count`、`city_noise_candidate_count` 和 `duplicate_content_count` 必须由人工抽查。
@@ -144,7 +143,7 @@ node scripts/assessment/assess_quality.mjs \
 
 - 已实现 `scripts/assessment/assess_quality.mjs`。
 - 脚本读取 `route-structure.json`、`facts-workspace.json` 和 HTML 输出目录，生成 `quality-metrics.json`。输出包含 `metrics`、候选风险明细、机械校验错误明细和 warnings。
-- `final_verify_pass`、`broken_link_count`、`missing_photo_count`、`remote_resource_count`、`forbidden_section_count` 复用现有 `verify_output.mjs` 的主要规则口径。
+- `final_verify_pass`、`broken_link_count`、`missing_photo_count`、`remote_resource_count` 复用现有 `verify_output.mjs` 的主要规则口径。
 - `wrong_attribution_candidate_count` 当前按“其他 route_place 出现在非当天 day page”及“route_place 出现在疑似无关 city page”生成候选。
 - `city_noise_candidate_count` 当前按城市页低价值短语、城市条目提到 route_place、城市条目与景点事实精确重复生成候选。
 - `duplicate_content_count` 当前只统计最终 HTML 中 `p`、`li`、`figcaption` 的精确重复，避免把 facts 与 HTML 的正常渲染关系误算为重复。
@@ -159,7 +158,7 @@ node scripts/assessment/assess_quality.mjs \
   -o output/2026-guoqing-self-drive-plan/quality-metrics.json
 ```
 
-- 样例结果：`route_place_coverage=1`、`empty_required_place_count=0`、`wrong_attribution_candidate_count=0`、`city_noise_candidate_count=17`、`duplicate_content_count=0`、`final_verify_pass=true`、`broken_link_count=0`、`missing_photo_count=0`、`remote_resource_count=0`、`forbidden_section_count=0`、`source_traceability_ratio=0.9497`。
+- 样例结果：`route_place_coverage=1`、`empty_required_place_count=0`、`wrong_attribution_candidate_count=0`、`city_noise_candidate_count=17`、`duplicate_content_count=0`、`final_verify_pass=true`、`broken_link_count=0`、`missing_photo_count=0`、`remote_resource_count=0`、`source_traceability_ratio=0.9497`。
 - 已额外运行 `npm run verify -- output/2026-guoqing-self-drive-plan`，现有机械校验通过。
 
 ### 阶段 4：实现 run wrapper

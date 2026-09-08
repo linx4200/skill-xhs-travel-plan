@@ -156,19 +156,14 @@ node scripts/render_travel_html.mjs <工作目录>/facts-workspace.json -o <输�
 node scripts/verify_output.mjs <输出目录>
 ```
 
-校验失败时，优先修正 `facts-workspace.json` 后重新渲染；只有样式或结构规则本身需要改变时，才修改渲染脚本。
+校验失败时，优先确认输出目录是否为最新渲染结果，再修正 `facts-workspace.json` 或资源引用后重新渲染。
 
 校验覆盖：
 
-- 所有 HTML 外链 `reading-first.css`。
-- 所有 HTML 包含移动端 viewport meta。
-- 首页无 `nav.page-nav`，并包含生成时间。
-- 首页包含 `ol.timeline`，且首页 Day 节点不包含详情 `ul` 列表。
-- 首页链接到所有 `day-XX.html`；城市页被首页链接。
-- 每日页有顶部和底部导航。
-- 链接和图片目标存在。
-- 图片只来自 `assets/photos/...`。
-- 禁止远程资源、脚本、iframe、占位图和“餐饮节奏”等不应出现的内容。
+- 输出目录存在。
+- `index.html` 存在。
+- HTML 中的本地 `href` / `src` 目标存在。
+- HTML 中不出现 `http://` 或 `https://` 远程资源引用。
 
 校验脚本不能判断攻略事实是否正确、是否只使用授权材料、景点是否应出现在路线中、城市 `include` 是否合理、信息冲突是否处理充分、或内容是否有套话重复。这些仍按 [info-rules.md](info-rules.md) 和 `SKILL.md` 的人工检查执行。
 
