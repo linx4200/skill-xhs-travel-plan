@@ -7,11 +7,11 @@ import { test } from "node:test";
 
 const skillRoot = path.resolve(import.meta.dirname, "..");
 
-test("RAG facts workspace takes photos from source_chunks/photos", () => {
+test("RAG facts workspace takes photos from rag-index sibling photos", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rag-photos-"));
   const sourceChunksRoot = path.join(tmp, "chunks");
-  fs.mkdirSync(path.join(sourceChunksRoot, "photos", "A地方"), { recursive: true });
-  fs.writeFileSync(path.join(sourceChunksRoot, "photos", "A地方", "01.jpg"), "");
+  fs.mkdirSync(path.join(tmp, "photos", "A地方"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "photos", "A地方", "01.jpg"), "");
 
   const ragIndexPath = path.join(tmp, "rag-index.json");
   fs.writeFileSync(
@@ -65,8 +65,11 @@ test("RAG facts workspace takes photos from source_chunks/photos", () => {
   assert.deepEqual(facts.places["A地方"].photos, ["photos/A地方/01.jpg"]);
 });
 
-test("RAG facts workspace does not fall back to resource_root for photos", () => {
+test("RAG facts workspace does not fall back to source_chunks or resource_root for photos", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rag-no-photo-fallback-"));
+  const sourceChunksRoot = path.join(tmp, "chunks");
+  fs.mkdirSync(path.join(sourceChunksRoot, "photos", "A地方"), { recursive: true });
+  fs.writeFileSync(path.join(sourceChunksRoot, "photos", "A地方", "01.jpg"), "");
   const resourceRoot = path.join(tmp, "resources");
   fs.mkdirSync(path.join(resourceRoot, "photos", "A地方"), { recursive: true });
   fs.writeFileSync(path.join(resourceRoot, "photos", "A地方", "01.jpg"), "");
@@ -77,6 +80,7 @@ test("RAG facts workspace does not fall back to resource_root for photos", () =>
     `${JSON.stringify({
       schema_version: 1,
       resource_root: resourceRoot,
+      source_chunks: "chunks",
       chunks: [
         {
           chunk_id: "a-place",
@@ -119,6 +123,6 @@ test("RAG facts workspace does not fall back to resource_root for photos", () =>
 
   const facts = JSON.parse(fs.readFileSync(outPath, "utf8"));
   assert.equal(facts.source.resource_root, "");
-  assert.equal(Object.hasOwn(facts.source, "source_chunks"), false);
+  assert.equal(facts.source.source_chunks, sourceChunksRoot);
   assert.deepEqual(facts.places["A地方"].photos, []);
 });

@@ -54,15 +54,8 @@ function countPhotos(resourceRoot) {
   return { photos_root_exists: true, photo_count: count };
 }
 
-function resolveRagPath(value, ragIndexPath) {
-  const text = String(value ?? "").trim();
-  if (!text) return "";
-  if (path.isAbsolute(text)) return text;
-  return path.resolve(path.dirname(path.resolve(ragIndexPath)), text);
-}
-
-function photoResourceRoot(parsed, ragIndexPath) {
-  return resolveRagPath(parsed.source_chunks, ragIndexPath);
+function photoResourceRoot(ragIndexPath) {
+  return path.dirname(path.resolve(ragIndexPath));
 }
 
 function validateChunks(chunks) {
@@ -98,7 +91,7 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const inputPath = path.resolve(args.ragIndex);
   const { parsed, chunks, input_format } = readIndex(inputPath);
-  const photoRoot = photoResourceRoot(parsed, inputPath);
+  const photoRoot = photoResourceRoot(inputPath);
   const summary = {
     ok: true,
     input_format,

@@ -11,7 +11,7 @@
 - 先批量生成 `retrieval-workspace.json`，再按 target 的 `unique_chunk_ids` 局部阅读 chunks；不要把流程变成反复手写关键词、反复检索的主循环。
 - `themes` 只辅助定位字段，不能代替事实判断。不要把 chunk 原文、score、`matched_by` 或大段 evidence 写入 `facts-workspace.json`。
 - 后续局部修改优先复用已有 `retrieval-workspace.json` 的 target、`unique_chunk_ids` 和 `themes`；只有字段缺口、冲突或高风险不确定项需要复核时才定向补检索。
-- 照片只按 `rag-index.source_chunks/photos` 下的目录名、文件名和路径归属，不读取、预览、OCR 或视觉解析图片内容。
+- 照片只按输入的 `rag-index.json` 同级 `photos/` 下的目录名、文件名和路径归属，不读取、预览、OCR 或视觉解析图片内容。
 
 ## 输入
 
@@ -22,7 +22,7 @@
 
 可选具备：
 
-- `rag-index.source_chunks/photos` 对应的本地照片目录；缺失时只影响照片归属，不触发原材料回读。
+- 输入的 `rag-index.json` 同级 `photos/` 本地照片目录；缺失时只影响照片归属，不触发原材料回读。
 
 ## Step 1：创建 Route Structure
 
@@ -42,7 +42,7 @@ node scripts/rag/validate_rag_index.mjs <rag-index.json>
 
 - 顶层应能解析为 JSON 或 JSONL。
 - chunk 应包含可用于检索的 `chunk_id`、`source_uri`、`title`、`text`、`candidate_places` 和 `candidate_cities`。
-- 如果需要渲染本地照片，`source_chunks` 应指向可读资源目录，且照片应位于 `<source_chunks>/photos/` 下。
+- 如果需要渲染本地照片，照片应位于输入的 `rag-index.json` 同级 `photos/` 下。
 
 命令输出只保留统计和错误；不要把 `chunks[].text`、chunk 标题列表或 `embedding` 打印到对话上下文。脚本报错时停止当前流程，并向用户报告错误。
 
