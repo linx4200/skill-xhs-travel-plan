@@ -83,7 +83,7 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 - 带 `city` 的检索只召回 `candidate_cities` 命中目标城市的 chunk，并对同时绑定 `candidate_places` 的地点级 chunk 施加 theme-sensitive 软惩罚。
 - 若 chunks 含 embedding，则 query embedding 相似度参与主题候选池内排序；标题/正文关键词、实体、标题来源分和来源 penalty 保留为可解释排序信号。
 
-Agent 填 facts 时按 `unique_chunk_ids` 到顶层 `chunks_by_id` 读取原文，再用 `themes` 辅助定位字段。不要把 `text`、`score`、`matched_by` 或大段 evidence 写入最终 `facts-workspace.json`。
+Agent 填 facts 时按 `unique_chunk_ids` 到顶层 `chunks_by_id` 读取原文，再用 `themes` 辅助定位字段。若 chunk 中出现本次行程城市或地点的海拔数值，必须写入对应 facts 目标的 `elevation_m`。不要把 `text`、`score`、`matched_by` 或大段 evidence 写入最终 `facts-workspace.json`。
 
 ## retrieval-log.json
 

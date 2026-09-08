@@ -61,7 +61,7 @@
 - `stats.pending_files`：尚未完成 agent 阅读的文件数量；初始化为文件总数。
 - `files[].path`、`title`、`kind`、`char_count`、`consumers`、`candidate_places`、`candidate_cities`、`keywords`、`priority`：来自 `reading-queue.json` 的文件元数据和目标归属。
 - `files[].reviewed`：agent 读完该文件并完成摘要后设为 `true`。
-- `files[].facts`：该文件中可分发到地点、城市、每日提醒或全局字段的事实项；每项应标明 `target_type`、`target_name`、`field` 和 `items`。可选保留短 `evidence`，只用于复核，不进入最终正文。
+- `files[].facts`：该文件中可分发到地点、城市、每日提醒或全局字段的事实项；每项应标明 `target_type`、`target_name`、`field` 和 `items`。地点/城市海拔用 `field: "elevation_m"`，`items` 放一个米制数字或可解析数字字符串。可选保留短 `evidence`，只用于复核，不进入最终正文。
 - `files[].conflicts`：该文件暴露的事实冲突或待复核线索。
 - `files[].global_notes`：不只归属单个地点或城市的全局提醒。
 

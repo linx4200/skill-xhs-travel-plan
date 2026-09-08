@@ -64,7 +64,7 @@ node scripts/create_source_digest_workspace.mjs \
 
 ### 3.1 填充 source digest
 
-随后 agent 读取 `source-digest.json` 中的 `files[]`，只打开与地点、城市、全局提醒或冲突判断相关的原文，并按 [info-rules.md](info-rules.md) 填充每个文件的 `facts`、`conflicts` 和 `global_notes`。
+随后 agent 读取 `source-digest.json` 中的 `files[]`，只打开与地点、城市、全局提醒或冲突判断相关的原文，并按 [info-rules.md](info-rules.md) 填充每个文件的 `facts`、`conflicts` 和 `global_notes`。如果原文中出现行程城市或 `route_places` 地点的海拔数值，必须作为 `elevation_m` fact 记录到对应目标。
 
 地点 `source_files` 来自 `candidate_places` 和明显同指的别名匹配，城市 `source_files` 来自 `candidate_cities`；文件路径或标题命中只作为兜底。若没有生成 `source-digest.json`，才直接读取 `reading-queue.json`；若也没有生成 `reading-queue.json`，才直接从 `facts-workspace.json` 汇总 `source_files` 后手工建立去重读取队列。
 
@@ -92,7 +92,7 @@ node scripts/apply_source_digest_to_facts.mjs \
   -o <工作目录>/facts-workspace.json
 ```
 
-`apply_source_digest_to_facts.mjs` 只做目标路由、追加、按文本去重和来源引用合并，不做事实取舍、冲突合并、表达优化或城市页 include 判断。分发后仍应保持 `needs_agent_review: true`。
+`apply_source_digest_to_facts.mjs` 只做目标路由、追加、按文本去重、来源引用合并，以及 `elevation_m` 等海拔标量字段的空值填充；不做事实取舍、冲突合并、表达优化或城市页 include 判断。分发后仍应保持 `needs_agent_review: true`。
 
 ### 3.3 语义修正和局部 patch
 
@@ -121,11 +121,12 @@ node scripts/create_read_log.mjs \
 
 ## 阶段 4：渲染前收口
 
-渲染 HTML 前必须读取 [pre-render-online-research.md](pre-render-online-research.md)，独立判断本次攻略是否触发被允许的联网查询项。除用户另行明确授权外，只能查询该 reference 白名单中列出的信息。对每个被允许查询的信息项，先检查 `facts-workspace.json` 是否已有明确且无冲突的可用事实；已有充分事实时直接复用，不再联网重复查询；只有 facts 缺失、覆盖不完整、存在冲突，或 reference 对该信息项明确要求核验时，才查询必要目标，并把查询结果、来源 URL 和查询日期写回 `facts-workspace.json` 的对应字段。
+渲染 HTML 前必须读取 [pre-render-online-research.md](pre-render-online-research.md)，独立判断本次攻略是否触发被允许的联网查询项。除用户另行明确授权外，只能查询该 reference 白名单中列出的信息。对每个被允许查询的信息项，先检查 `facts-workspace.json` 是否已有明确且无冲突的可用事实；已有充分事实时直接复用。只有 facts 缺失、覆盖不完整、存在冲突，或 reference 对该信息项明确要求核验时，才查询必要目标，并把查询结果、来源 URL 和查询日期写回 `facts-workspace.json` 的对应字段。
 
 进入渲染前，必须完成字段级缺口检查：
 
 - 每个 `route_places` 地点都有可用内容，或明确记录 `材料未说明` / `需出行前确认`。
+- 本地材料已经出现的城市或景点海拔都已写入对应 `elevation_m`；海拔缺失按 [info-rules.md](info-rules.md) 处理。
 - 每日 `summary`、`timeline`、`notes` 和 `confirmations` 已按本次路线整理，不保留素材审计旁白。
 - 路线外地点不会进入每日景点详情。
 - 城市页只为通过独立增量价值判断的城市设置 `include: true`。
