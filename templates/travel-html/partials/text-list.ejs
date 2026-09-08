@@ -1,6 +1,9 @@
 <% const pad = " ".repeat(typeof indent === "number" ? indent : 6); -%>
 <%- pad %><ul>
 <% items.forEach((item) => { -%>
-<%- pad %>  <li><%= item %></li>
+<% const isObject = item && typeof item === "object" && !Array.isArray(item); -%>
+<% const text = isObject && Object.hasOwn(item, "text") ? item.text : item; -%>
+<% const className = isObject && item.className ? item.className : ""; -%>
+<%- pad %>  <li<% if (className) { %> class="<%= className %>"<% } %>><%= text %></li>
 <% }) -%>
 <%- pad %></ul>

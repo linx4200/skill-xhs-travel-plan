@@ -9,10 +9,15 @@
     "create-queue": "node scripts/create_reading_queue.mjs",
     "create-digest": "node scripts/create_source_digest_workspace.mjs",
     "create-read-log": "node scripts/create_read_log.mjs",
+    "apply-facts-patch": "node scripts/apply_facts_patch.mjs",
     "validate-digest": "node scripts/validate_source_digest.mjs",
     "apply-digest": "node scripts/apply_source_digest_to_facts.mjs",
+    "rag:validate": "node scripts/rag/validate_rag_index.mjs",
+    "rag:retrieve": "node scripts/rag/rag_retrieve.mjs",
+    "rag:workspace": "node scripts/rag/create_retrieval_workspace.mjs",
     "render": "node scripts/render_travel_html.mjs",
-    "verify": "node scripts/verify_output.mjs"
+    "verify": "node scripts/verify_output.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "ejs": "^6.0.1"
