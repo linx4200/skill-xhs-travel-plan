@@ -129,5 +129,6 @@ Agent 填 facts 时按 `unique_chunk_ids` 到顶层 `chunks_by_id` 读取原文�
 - `source.resource_index` 应为空字符串。
 - `source.rag_index` 应记录当前 RAG index 文件名或相对路径。
 - `source.source_chunks` 应记录由 `rag-index.source_chunks` 解析出的绝对目录路径。
+- `source.photo_resource_root` 应记录输入 `rag-index.json` 所在目录，渲染脚本用它定位同级 `photos/` 下的本地照片。
 - `places.*.source_files` 和 `cities.*.source_files` 来自命中 chunk 的 `source_uri` / `path`，只作为内部来源线索和调试口径，不表示必须回读原始文本。
 - `photos` 由 `create_fact_workspace.mjs --rag-index` 直接扫描输入的 `rag-index.json` 同级 `photos/` 的目录名、文件名和路径后按地点名或别名归属。该字段不保存图片 OCR、视觉摘要或其他画面解析结果。

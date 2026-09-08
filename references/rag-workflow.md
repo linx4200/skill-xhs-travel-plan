@@ -61,6 +61,8 @@ node scripts/create_fact_workspace.mjs \
 
 RAG 分支下的 skeleton 应至少包含 schema/source、trip days、route places、cities、`global_notes` 和 `confirm_before_departure`。RAG chunk 原文、检索分数、字段完整性状态、补检索决策和大段 evidence 不写入 `facts-workspace.json`。
 
+RAG 分支的 `source.photo_resource_root` 固定写入 `rag-index.json` 所在目录，供渲染脚本复制同级 `photos/` 下的本地照片；`source.source_chunks` 只记录 chunk 来源目录，不作为照片根目录。
+
 ## Step 4：创建 Retrieval Workspace
 
 运行：
