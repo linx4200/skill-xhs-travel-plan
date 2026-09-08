@@ -133,7 +133,7 @@
 ## 字段维护原则
 
 - 新增、删除或改名 `route-structure.json` 或 `facts-workspace.json` 共同字段时，同时检查 `scripts/create_fact_workspace.mjs`、`scripts/render_travel_html.mjs` 和本文件。
-- 新增或调整 RAG 分支专属结构时，同时检查 `scripts/create_retrieval_workspace.mjs`、[rag-workflow.md](rag-workflow.md)、[rag-data-contracts.md](rag-data-contracts.md)。
+- 新增或调整 RAG 分支专属结构时，同时检查 `scripts/rag/create_retrieval_workspace.mjs`、[rag-workflow.md](rag-workflow.md)、[rag-data-contracts.md](rag-data-contracts.md)。
 - 新增或调整结构化分支专属结构时，同时检查 `scripts/create_reading_queue.mjs`、`scripts/create_source_digest_workspace.mjs`、[structured-generation-workflow.md](structured-generation-workflow.md)、[structured-data-contracts.md](structured-data-contracts.md)。
 - 字段是否应该填、填什么内容，按 [info-rules.md](info-rules.md) 判断。
 - 字段为空时，渲染脚本应跳过对应小节，不要靠占位文案凑完整性。

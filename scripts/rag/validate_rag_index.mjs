@@ -11,7 +11,7 @@ function parseArgs(argv) {
     if (!args.ragIndex) args.ragIndex = arg;
     else throw new Error(`Unexpected argument: ${arg}`);
   }
-  if (!args.ragIndex) throw new Error("Usage: node scripts/validate_rag_index.mjs <rag-index.json|jsonl>");
+  if (!args.ragIndex) throw new Error("Usage: node scripts/rag/validate_rag_index.mjs <rag-index.json|jsonl>");
   return args;
 }
 
