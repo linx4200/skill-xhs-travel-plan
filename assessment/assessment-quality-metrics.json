@@ -179,16 +179,6 @@
       "notes": "本 skill 默认禁止远程资源，目标值为 0。"
     },
     {
-      "name": "forbidden_section_count",
-      "definition": "最终 HTML 或 facts-workspace 中出现规则禁止的小节或表达数量。",
-      "unit": "items",
-      "automation_level": "partial",
-      "can_be_automated": true,
-      "data_sources": ["facts-workspace.json", "output html", "manual-quality-check.md"],
-      "calculation": "scan for known forbidden phrases or sections, such as 餐饮节奏 and placeholder content.",
-      "notes": "已知禁用词可自动化；新的违规表达需要人工维护规则。"
-    },
-    {
       "name": "source_traceability_ratio",
       "definition": "最终结构化事实中能追溯到 source_files、source-digest evidence 或 RAG chunk source 的比例。",
       "unit": "ratio",
