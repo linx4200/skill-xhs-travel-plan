@@ -16,8 +16,8 @@
 JSON 版本重要字段：
 
 - `schema_version`：索引结构版本。
-- `resource_root`：输入材料文件夹绝对路径；RAG-only 流程只用它定位本地 `photos/`，不回读原始文本。
-- `source_chunks`：上游 chunk 来源文件路径或说明。
+- `resource_root`：结构化流程字段；RAG-only 流程不使用它定位本地照片。
+- `source_chunks`：上游 chunk 来源目录。RAG-only 流程使用 `<source_chunks>/photos/` 定位本地照片。照片只按目录名、文件名和路径处理，不读取图片画面。
 - `embedding.provider`、`model`、`dimensions`：向量信息；当 chunks 含有 `embedding` 向量时，检索脚本会调用真实 embedding API 生成 query 向量参与排序。
 - `chunks[]`：RAG chunk 列表。
 
@@ -120,7 +120,8 @@ RAG 分支填 facts 时，agent 应按 `unique_chunk_ids` 到顶层 `chunks_by_i
 
 - `source.resource_index` 应为空字符串。
 - `source.rag_index` 应记录当前 RAG index 文件名或相对路径。
+- `source.source_chunks` 应记录由 `rag-index.source_chunks` 解析出的绝对目录路径。
 - `places.*.source_files` 和 `cities.*.source_files` 来自命中 chunk 的 `source_uri` / `path`，只作为内部来源线索和调试口径，不表示必须回读原始文本。
-- `photos` 由 `create_fact_workspace.mjs --rag-index` 直接扫描 `rag-index.resource_root/photos` 后按地点名或别名归属。
+- `photos` 由 `create_fact_workspace.mjs --rag-index` 直接扫描 `rag-index.source_chunks/photos` 的目录名、文件名和路径后按地点名或别名归属。该字段不保存图片 OCR、视觉摘要或其他画面解析结果。
 
 RAG-only happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json`、`read-log.json` 或 `retrieval-log.json`；只有用户明确要求时才创建检索调试日志。

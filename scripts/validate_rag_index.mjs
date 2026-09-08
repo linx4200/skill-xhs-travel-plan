@@ -54,6 +54,17 @@ function countPhotos(resourceRoot) {
   return { photos_root_exists: true, photo_count: count };
 }
 
+function resolveRagPath(value, ragIndexPath) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (path.isAbsolute(text)) return text;
+  return path.resolve(path.dirname(path.resolve(ragIndexPath)), text);
+}
+
+function photoResourceRoot(parsed, ragIndexPath) {
+  return resolveRagPath(parsed.source_chunks, ragIndexPath);
+}
+
 function validateChunks(chunks) {
   const missingRequiredFields = Object.fromEntries(REQUIRED_CHUNK_FIELDS.map((field) => [field, 0]));
   let chunksWithEmbedding = 0;
@@ -87,15 +98,18 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const inputPath = path.resolve(args.ragIndex);
   const { parsed, chunks, input_format } = readIndex(inputPath);
+  const photoRoot = photoResourceRoot(parsed, inputPath);
   const summary = {
     ok: true,
     input_format,
     schema_version: parsed.schema_version ?? null,
     resource_root: parsed.resource_root ?? "",
+    source_chunks: parsed.source_chunks ?? "",
+    photo_source_root: photoRoot,
     embedding_model: parsed.embedding?.model ?? "",
     embedding_dimensions: parsed.embedding?.dimensions ?? null,
     ...validateChunks(chunks),
-    ...countPhotos(parsed.resource_root ? String(parsed.resource_root) : ""),
+    ...countPhotos(photoRoot),
   };
   const missingTotal = Object.values(summary.missing_required_fields).reduce((total, value) => total + value, 0);
   if (missingTotal > 0) summary.ok = false;

@@ -48,6 +48,23 @@ function toPosix(value) {
 }
 
 /**
+ * 解析 RAG index 中指向本地资源的路径。相对路径按 rag-index.json 所在目录展开。
+ */
+function resolveRagPath(value, ragIndexPath) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  if (path.isAbsolute(text)) return text;
+  return path.resolve(path.dirname(path.resolve(ragIndexPath)), text);
+}
+
+/**
+ * RAG 分支的照片根目录只来自 source_chunks。
+ */
+function photoResourceRootFromRag(ragIndex, ragIndexPath) {
+  return resolveRagPath(ragIndex.source_chunks, ragIndexPath);
+}
+
+/**
  * 递归遍历目录，返回按中文 locale 排序后的所有文件路径。
  */
 function walk(root) {
@@ -127,11 +144,12 @@ function indexFromRag(ragIndexPath) {
     filesByPath.set(sourcePath, existing);
   }
 
-  const resourceRoot = String(ragIndex.resource_root ?? path.dirname(path.resolve(ragIndexPath)));
+  const resourceRoot = photoResourceRootFromRag(ragIndex, ragIndexPath);
   return {
     source_kind: "rag-index",
     rag_index: path.basename(ragIndexPath),
-    resource_root: resourceRoot,
+    source_chunks: resourceRoot,
+    resource_root: "",
     files: [...filesByPath.values()].sort((a, b) => a.path.localeCompare(b.path, "zh-CN")),
     photos: scanPhotos(resourceRoot),
   };
@@ -277,6 +295,7 @@ function buildFacts(index, routeStructure) {
     source: {
       resource_root: index.resource_root ?? "",
       resource_index: index.source_kind === "rag-index" ? "" : "resource-index.json",
+      ...(index.source_chunks ? { source_chunks: index.source_chunks } : {}),
       route_structure: "route-structure.json",
       ...(index.rag_index ? { rag_index: index.rag_index } : {}),
     },

@@ -26,7 +26,7 @@ RAG 检索使用真实 embedding API。运行 `create_retrieval_workspace.mjs` �
 RAG 流程先跑到第一版 `facts-workspace.json`：
 
 1. 读取用户路线，按 [references/info-rules.md](references/info-rules.md)、[references/data-contracts.md](references/data-contracts.md) 和 [references/rag-data-contracts.md](references/rag-data-contracts.md) 人工创建 `route-structure.json`。
-2. 用 `scripts/validate_rag_index.mjs <rag-index.json>` 校验索引可解析和必要字段完整；不要自行读取、抽样、统计、打印或预览完整索引。后续脚本失败时停止当前流程，并把失败原因告诉用户。如果后续需要本地照片，使用脚本从 `rag-index.resource_root/photos` 归属照片；若 `resource_root` 不存在或不可读，只影响照片归属，不进入原材料回读流程。
+2. 用 `scripts/validate_rag_index.mjs <rag-index.json>` 校验索引可解析和必要字段完整；不要自行读取、抽样、统计、打印或预览完整索引。后续脚本失败时停止当前流程，并把失败原因告诉用户。如果后续需要本地照片，使用脚本从 `rag-index.source_chunks/photos` 归属照片；脚本和 agent 都只能按目录名、文件名和路径归属照片，不得读取、预览、OCR 或视觉解析图片内容。若 `source_chunks` 不存在或不可读，只影响照片归属，不进入原材料回读流程。
 3. 运行 `create_fact_workspace.mjs --rag-index` 创建带 schema 和路线骨架的 skeleton `facts-workspace.json`。
 4. 运行 `create_retrieval_workspace.mjs`，基于 `facts-workspace.json` 和 `rag-index.json` 批量创建 `retrieval-workspace.json`。默认不要传 `--log`，也不要创建 `retrieval-log.json`；只有用户明确要求 RAG 召回日志、检索日志或召回原因诊断时，才追加 `--log <工作目录>/retrieval-log.json`。
 5. Agent 读取 `retrieval-workspace.json`，按景点、城市和主题整理 facts patch，再用 `apply_facts_patch.mjs` 合并到第一版 `facts-workspace.json`；此时 `needs_agent_review` 仍保持 `true`，等待后续字段级 checklist、补检索、缺口处理或渲染前评估。
@@ -77,6 +77,8 @@ RAG happy path 中不要创建 `resource-index.json`、`reading-queue.json`、`s
 
 生成完整攻略时，不要默认把所有素材全文、页面规范和 HTML 草稿同时塞进上下文。优先根据入口分支使用 RAG 流程或结构化流程；材料很少、用户只要文字整理或单页草稿时，可以直接整理，但仍要遵守资料边界。
 
+无论走 RAG 流程还是结构化流程，`photos/` 下的图片都只作为本地展示素材和文件名/目录名线索。Agent 不得打开图片、截图预览、使用视觉模型、OCR 或其他方式读取和解析图片画面内容；照片归属、`alt` 和 `caption` 只能根据 `photos/地点名/文件名`、明显别名、扩展名和已由文本材料确认的地点信息生成。仅图片画面看起来包含的信息不能作为攻略事实。
+
 RAG 流程中，默认先按 `retrieval-workspace.json` 的 target 和 `unique_chunk_ids` 读取 chunks，再用 `themes` 辅助定位字段。不要把 chunk 原文、score、`matched_by` 或大段 evidence 写入 `facts-workspace.json`；只写 agent 判断后的可执行事实、冲突和待确认事项。
 
 写入 `facts-patch.json` 前必须先过展示字段写作门槛：内部判断可以保留材料线索，但 `trip.days[].summary/timeline/notes/confirmations`、`places.*` 和 `cities.*` 中会进入 HTML 的字段必须改成直接的执行表达，不得出现“材料指出”“材料中的”“材料还提到”“材料提到”“材料显示”“材料写到”“材料中出现”“资料中”“来源”等旁白式溯源。只允许保留必要的边界提示，例如 `材料未说明`、`需出行前确认`、`未确认`；冲突字段可以说明“记录时间不一”“说法不一致”，但不要写成资料审计口吻。写完 patch、运行 `apply_facts_patch.mjs` 前，先用搜索检查上述禁用表达，发现即改，不等到渲染后人工抽查。
@@ -93,7 +95,7 @@ RAG 流程中，默认先按 `retrieval-workspace.json` 的 target 和 `unique_c
 
 - 用户提供的本地输入文件夹。
 - 输入文件夹中的 `.json`、`.md`、`.txt`、截图 OCR 文本、整理稿等文本材料。
-- 输入文件夹中的本地照片。
+- 输入文件夹中的本地照片文件名、目录名和路径；照片画面内容不作为可读取或可推断的事实来源。
 
 除非用户明确要求并授权联网核验，或 [references/pre-render-online-research.md](references/pre-render-online-research.md) 明确允许，不要联网搜索、补充常识、猜测最新信息或自行扩写材料中没有的事实。不要声称信息“最新”“已确认”“正常开放”“价格有效”或“安全无风险”，除非材料中明确写明。
 
@@ -117,6 +119,7 @@ RAG 流程中，默认先按 `retrieval-workspace.json` 的 target 和 `unique_c
 
 - 未涉及到用户路线的 `route_places` 地点，不要出现在每日景点详情中。
 - 不要自主搜索任何资料，除非用户明确授权或 [references/pre-render-online-research.md](references/pre-render-online-research.md) 明确允许。
+- 不要打开、预览、OCR、视觉识别或解析 `photos/` 下的图片内容；只按目录名、文件名和路径处理照片。
 - 不要联网补图、使用占位图、使用远程图片链接或把其他景点照片挪作当前景点照片。
 - 不要添加输入材料中没有的营业时间、票价、优惠政策、交通时长、天气或习俗。
 - 不要声称资料“最新”或“已确认”，除非输入材料中明确写明。

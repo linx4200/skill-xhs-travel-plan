@@ -130,7 +130,7 @@ unresolved high-risk fields or conflicts
 
 - `rag-index.json` 可以被解析为 JSON 或 JSONL。
 - chunks 至少包含 `chunk_id`、`source_uri`、`title`、`text`、`candidate_places` 和 `candidate_cities`。
-- 如需渲染本地照片，`resource_root` 指向可读目录，且照片位于 `photos/` 下。照片只影响渲染素材归属，不意味着要回读原始文本。
+- 如需渲染本地照片，`source_chunks` 指向可读目录，且照片位于 `<source_chunks>/photos/` 下。照片只按目录名、文件名和路径影响渲染素材归属，不意味着要回读原始文本，也不得读取或视觉解析图片内容。
 
 本框架后续重点从阶段 3 开始：如何直接基于 `rag-index.json` 创建 skeleton `facts-workspace.json`，如何批量创建 `retrieval-workspace.json`，以及如何用字段级 checklist 驱动补检索和缺口处理。
 
@@ -144,7 +144,7 @@ unresolved high-risk fields or conflicts
 - 为每个 `route_places` 创建 `places.<地点名>` 空槽位。
 - 为每个候选城市创建 `cities.<城市名>` 空槽位，并默认 `include: false`。
 - 为所有字段提供稳定默认值，例如字符串为空字符串、列表为空数组、数值未知为 `null`。
-- 从 `rag-index.json` 初步填入地点/城市的来源线索，并从 `rag-index.resource_root/photos` 直接匹配本地照片。
+- 从 `rag-index.json` 初步填入地点/城市的来源线索，并从 `rag-index.source_chunks/photos` 的目录名、文件名和路径直接匹配本地照片。
 - 保持 `needs_agent_review: true`，直到 agent 完成事实填充、冲突处理和完整性评估。
 
 第三步不应写入：
@@ -158,7 +158,7 @@ unresolved high-risk fields or conflicts
 
 这些过程信息分别放在后续的 `retrieval-workspace.json` 或 completeness checklist 中处理。
 
-当前 `create_fact_workspace.mjs` 应支持 `--rag-index`。RAG 分支下不需要先生成 `resource-index.json`；脚本可以从 RAG chunks 生成最小来源线索，并直接扫描 `resource_root/photos` 归属照片。如需区分地点命中与城市泛命中的可靠性，优先在第四步或第六步处理，不急于污染 `facts-workspace.json`。
+当前 `create_fact_workspace.mjs` 应支持 `--rag-index`。RAG 分支下不需要先生成 `resource-index.json`；脚本可以从 RAG chunks 生成最小来源线索，并直接扫描 `source_chunks/photos` 的目录名、文件名和路径归属照片，不读取图片画面。如需区分地点命中与城市泛命中的可靠性，优先在第四步或第六步处理，不急于污染 `facts-workspace.json`。
 
 ### Skeleton facts-workspace.json 建议结构
 
@@ -176,16 +176,19 @@ unresolved high-risk fields or conflicts
   // 攻略标题，来自 route-structure.json.title；可先为空。
   "title": "",
 
-  // 上游输入和索引来源。渲染本地照片时依赖 resource_root。
+  // 上游输入和索引来源。RAG 分支渲染本地照片时依赖 source_chunks。
   "source": {
-    // 输入材料文件夹绝对路径，来自 rag-index.json.resource_root。
-    "resource_root": "/absolute/path/to/resources",
+    // RAG 分支可为空字符串；结构化流程使用该字段保存输入材料目录。
+    "resource_root": "",
 
     // RAG 分支可为空字符串；保留该字段兼容既有渲染和工具。
     "resource_index": "",
 
     // 当前 facts workspace 对应的 RAG 索引文件名或相对路径。
     "rag_index": "rag-index.json",
+
+    // RAG 分支使用的 chunk 来源目录，来自 rag-index.json.source_chunks。
+    "source_chunks": "/absolute/path/to/source_chunks",
 
     // 当前 facts workspace 对应的路线结构文件名或相对路径。
     "route_structure": "route-structure.json"
@@ -274,8 +277,8 @@ unresolved high-risk fields or conflicts
       // 材料冲突、低置信、需出行前确认的信息。
       "conflicts": [],
 
-      // 本地照片路径，来自 rag-index.resource_root/photos 的目录匹配。
-      // 只能使用输入材料中的本地照片。
+      // 本地照片路径，来自 rag-index.source_chunks/photos 的目录名、文件名和路径匹配。
+      // 只能使用输入材料中的本地照片，不保存图片画面解析结果。
       "photos": [],
 
       // RAG 来源线索，来自命中该地点的 chunk source_uri。

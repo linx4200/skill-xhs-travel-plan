@@ -17,7 +17,7 @@
 - `files[].candidate_places`：命中的候选景点名，来自 `route-structure.json`、显式 `--place` 或照片目录。
 - `files[].candidate_cities`：命中的候选城市名，来自 `route-structure.json` 或显式 `--city`。
 - `files[].excerpt`：短摘录，只用于判断是否需要打开原文。
-- `photos`：按 `photos/地点名/` 或 `photos/地点别名/` 目录归属整理的本地照片路径。
+- `photos`：按 `photos/地点名/` 或 `photos/地点别名/` 目录和文件名归属整理的本地照片路径；不包含任何图片画面解析结果。
 
 ## reading-queue.json
 
