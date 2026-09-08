@@ -19,9 +19,9 @@ metadata:
 
 ### 结构化流程
 
-当满足以下任一条件时，在生成 `route-structure.json` 前读取 [references/structured-generation-workflow.md](references/structured-generation-workflow.md)，并优先使用其中的 `resource-index.json`、`facts-workspace.json`、渲染脚本和校验脚本流程：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、用户需要完整静态 HTML 攻略、或用户希望后续可重复修改。
+当满足以下任一条件时，在生成 `route-structure.json` 前读取 [references/structured-generation-workflow.md](references/structured-generation-workflow.md)，并优先使用其中的结构化低上下文流程：`resource-index.json` 建素材索引，`facts-workspace.json` 建事实工作区，`reading-queue.json` 按唯一原文文件去重读取，`source-digest.json` 保存文件级事实摘要，最后用渲染脚本和校验脚本生成 HTML。触发条件包括：输入材料包含 8 个及以上文本文件、文本总量约 30,000 字及以上、本地照片 20 张及以上、行程 3 天及以上、路线景点 5 个及以上、用户需要完整静态 HTML 攻略、或用户希望后续可重复修改。
 
-首次创建或修改 `route-structure.json`、`resource-index.json`、`facts-workspace.json` 任一结构化文件前，读取 [references/data-contracts.md](references/data-contracts.md)。后续只改正文表达、不触碰 JSON 结构时，不需要重复读取。
+首次创建或修改 `route-structure.json`、`resource-index.json`、`facts-workspace.json`、`reading-queue.json`、`source-digest.json` 任一结构化文件前，读取 [references/data-contracts.md](references/data-contracts.md)。后续只改正文表达、不触碰 JSON 结构时，不需要重复读取。
 
 ### 渲染前检查
 
@@ -41,7 +41,9 @@ metadata:
 
 生成完整攻略时，不要默认把所有素材全文、页面规范和 HTML 草稿同时塞进上下文。优先使用低上下文的结构化流程；材料很少、用户只要文字整理或单页草稿时，可以直接整理，但仍要遵守资料边界。
 
-结构化流程中，后续修改内容时优先改 `facts-workspace.json` 后重新渲染；只有 HTML 结构规则变化时才改渲染脚本。命令输出应保持简短，只显示统计、异常和必要样例，避免把大段素材打印到对话里。
+结构化流程中，默认先按 `source-digest.json.files[]` 的唯一文件顺序读取原文；如果 digest 尚未生成，才按 `reading-queue.json.files[]` 读取。不要按地点或城市逐项重复打开同一素材。文件读完后先把可用事实、冲突和全局提醒沉淀到 `source-digest.json`，再分发到 `facts-workspace.json`；如果没有生成 queue 或 digest，也必须先手工去重 `source_files` 再读原文。
+
+后续修改内容时，优先复用 `source-digest.json` 判断是否需要回读原文，再改 `facts-workspace.json` 后重新渲染；只有 HTML 结构规则变化时才改渲染脚本。命令输出应保持简短，只显示统计、异常和必要样例，避免把大段素材打印到对话里。
 
 优先输出可执行的旅行建议，删除套话、空话、重复信息和低价值占位内容。攻略应像给人看的执行清单，不要写成资料审计报告。
 

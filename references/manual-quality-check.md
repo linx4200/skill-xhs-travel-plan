@@ -11,6 +11,7 @@
 ## 检查清单
 
 - 是否只使用了用户提供、用户授权或 [pre-render-online-research.md](pre-render-online-research.md) 明确允许查询的材料。
+- 使用结构化流程时，是否已按 `source-digest.json.files[]` 或 `reading-queue.json.files[]` 的唯一文件顺序读取原文，并把有效事实分发进 `facts-workspace.json`。
 - 是否已覆盖用户路线中的每个城市和 `route_places` 真实游玩/短停地点。
 - 是否只为通过独立增量价值判断的城市生成 `city-XX.html`。
 - 每日景点详情是否只包含用户路线中的 `route_places` 地点，且没有把停车场、游客中心、入口等设施拼进标题。
@@ -23,4 +24,4 @@
 
 HTML 文件存在性、互链、CSS、首页导航、生成时间、远程资源和图片路径等机械检查由结构化流程中的 `node scripts/verify_output.mjs` 执行。
 
-如果脚本校验和人工检查都适用，先修正文案和 `facts-workspace.json` 中的事实问题，再重新渲染并运行脚本校验。
+如果脚本校验和人工检查都适用，先修正 `source-digest.json` 中未分发或需回读的问题，再修正文案和 `facts-workspace.json` 中的事实问题，最后重新渲染并运行脚本校验。
