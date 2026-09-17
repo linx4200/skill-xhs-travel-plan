@@ -8,8 +8,8 @@
 
 - `rag-index.json` 只能作为项目脚本输入。Agent 不得用 `cat`、`sed`、`head`、`jq`、临时脚本或编辑器打开、抽样、检索、统计或阅读其中的 `chunks`、`text`、`embedding`。
 - RAG happy path 不创建 `resource-index.json`、`reading-queue.json`、`source-digest.json`、`read-log.json` 或 `retrieval-log.json`。只有用户明确要求召回日志、检索日志或召回原因诊断时，才创建 `retrieval-log.json`。
-- 先批量生成 `retrieval-workspace.json`，再按 target 的 `unique_chunk_ids` 局部阅读 chunks；不要把流程变成反复手写关键词、反复检索的主循环。
-- `themes` 只辅助定位字段，不能代替事实判断。不要把 chunk 原文、score、`matched_by` 或大段 evidence 写入 `facts-workspace.json`。
+- 先批量生成 `retrieval-workspace.json`，再按 target 的字段优先读取 `themes.<theme>[]` 对应 chunks；`unique_chunk_ids` 只作为 target 级兜底阅读池。不要把流程变成反复手写关键词、反复检索的主循环。
+- `themes` 是字段优先阅读入口，不能代替事实判断。不要把 chunk 原文、score、`matched_by` 或大段 evidence 写入 `facts-workspace.json`。
 - 后续局部修改优先复用已有 `retrieval-workspace.json` 的 target、`unique_chunk_ids` 和 `themes`；只有字段缺口、冲突或高风险不确定项需要复核时才定向补检索。
 - 照片只按输入的 `rag-index.json` 同级 `photos/` 下的目录名、文件名和路径归属，不读取、预览、OCR 或视觉解析图片内容。
 
@@ -97,7 +97,7 @@ Embedding 配置规则：
 
 ## Step 5：填充第一版 Facts Workspace
 
-Agent 读取 `retrieval-workspace.json` 后整理局部 `facts-patch.json`，再运行：
+Agent 读取 `retrieval-workspace.json` 后，按 target 逐轮整理一次性局部 `facts-patch.json`，再运行：
 
 ```bash
 node scripts/apply_facts_patch.mjs \
@@ -105,15 +105,46 @@ node scripts/apply_facts_patch.mjs \
   --patch <工作目录>/facts-patch.json
 ```
 
+`facts-patch.json` 是当前轮次的最小临时变更载体，不是累计事实文件，也不是完整 `facts-workspace.json` 副本。每轮 patch 合并后立即清空或删除，下一轮重新生成。当前合并脚本对数组执行整体替换，因此 patch 中被修改的数组必须写完整新数组。
+
 处理顺序：
 
 1. 做引用完整性检查：facts 中的地点和城市都有对应 retrieval target，且 `unique_chunk_ids` / `themes.*[].chunk_id` 都能在 `chunks_by_id` 中找到。
-2. 按每日 `route_places` 顺序处理 `places`，先读 `unique_chunk_ids`，再用 `themes` 辅助定位字段。
-3. 将有效事实整理成 facts patch，只写判断后的执行信息、冲突和待确认事项，不复制 chunk 原文；如果 chunk 中出现对应地点或城市的海拔数值，必须写入 `places.<地点名>.elevation_m` 或 `cities.<城市名>.elevation_m`。
-4. 基于已写地点内容整理 `trip.days[].summary`、`timeline`、`notes` 和 `confirmations`。
-5. 所有地点处理完成后再处理 `cities`。城市页 `include` 判断必须先排除已经写进地点页、每日页、全局提醒或确认清单的内容。
-6. 最后整理 `global_notes` 和 `confirm_before_departure`。
-7. 合并 patch 后继续保持 `needs_agent_review: true`，等待字段级 checklist 和渲染前评估。
+2. 按每日 `route_places` 顺序逐个处理 `places`。每轮只选择一个 `places.<地点名>`，按字段优先读取对应 `themes.<theme>[]` 的 chunk_id，再到顶层 `chunks_by_id` 读取原文。
+3. 地点字段读取按下方字段覆盖规则收窄范围；每个 facts 字段都有固定读取入口或固定维护来源。
+4. 只有对应 theme 为空、信息不足、信息互相冲突、字段需要跨 theme 综合判断，或高风险执行字段需要复核时，才回退读取该 target 的 `unique_chunk_ids`。
+5. 将当前地点的有效事实整理成最小 facts patch。patch 只包含当前地点相关路径，只写判断后的执行信息、冲突和待确认事项，不复制 chunk 原文；如果 chunk 中出现对应地点或城市的海拔数值，必须写入 `places.<地点名>.elevation_m` 或 `cities.<城市名>.elevation_m`。
+6. 每个地点 patch 合并后立即清空或删除 `facts-patch.json`，再处理下一个地点。
+7. 所有地点处理完成后再逐个处理 `cities`。城市字段读取按下方字段覆盖规则收窄范围；需要综合判断或缺口复核时再回退 `unique_chunk_ids`。城市页 `include` 判断必须先排除已经写进地点页、每日页、全局提醒或确认清单的内容。
+8. 所有 places 和 cities 处理完成后，再单独生成 day-level patch，整理 `trip.days[].summary`、`timeline`、`notes` 和 `confirmations`。
+9. 最后单独生成 global-level patch，整理 `global_notes` 和 `confirm_before_departure`。
+10. 合并每轮 patch 后继续保持 `needs_agent_review: true`，等待字段级 checklist 和渲染前评估。
+
+字段覆盖规则：
+
+- 顶层和来源字段：`schema_version`、`title`、`source.*`、`trip.mode`、`trip.days[].day/date/title/lodging_city/route_places/source_line` 由 route structure 和 workspace skeleton 维护，不通过 RAG chunk 填充。`needs_agent_review` 在字段级检查和渲染前评估通过前保持 `true`。
+- 地点 `summary`、`highlights`：优先读取 `highlights`。
+- 地点 `drawbacks`：优先读取 `drawbacks`，必要时补读 `safety`、`crowds`。
+- 地点 `opening_hours`、`tickets`：优先读取 `tickets`，必要时补读 `safety` 中的关闭、限流、预约风险。
+- 地点 `duration`、`routes`、`play_options`：优先读取 `routes`，必要时补读 `transport`、`nearby`、`highlights`。
+- 地点 `practical_info`：优先读取 `transport`、`facilities`、`accessibility`，必要时补读 `safety`。
+- 地点 `notes`：优先读取 `safety`、`crowds`、`accessibility`，必要时补读 `drawbacks`。
+- 地点 `conflicts`：读取产生冲突的字段对应 theme；无法定位到单一 theme 时再读该地点 `unique_chunk_ids`。
+- 地点 `elevation_m`：从当前地点已读 chunks 中随读随记；字段完成后仍缺且需要复核时，优先读 `safety`，再回退 `unique_chunk_ids`。`elevation_source_url` 和 `elevation_checked_at` 按 [info-rules.md](info-rules.md) 的海拔信息规则填写。
+- 地点 `photos`：来自 `rag-index.json` 同级 `photos/` 的目录名、文件名和路径归属，不读取 chunk 原文、OCR 或图片画面。
+- 地点 `source_files`：保留 workspace 已有来源线索，并随当前 target 实际采用的 chunks 维护内部来源引用；不为填 `source_files` 单独回读原文。
+- 城市 `include`：在城市字段整理完成后判断，只在城市级信息对最终攻略有独立增量价值时设为 `true`。
+- 城市 `summary`、`overview`：优先读取 `notes`、`transport`。
+- 城市 `backup_places`：优先读取 `backup_places`。
+- 城市 `foods`：优先读取 `foods`。
+- 城市 `lodging`：优先读取 `lodging`，必要时补读 `transport` 中的位置和交通条件。
+- 城市 `transport`：优先读取 `transport`，必要时补读 `notes` 中的限行、路况和风险。
+- 城市 `shopping`：优先读取 `backup_places`、`foods` 中的手信、文创、市场和补给信息；没有明确购物或伴手礼价值时留空。
+- 城市 `notes`：优先读取 `notes`，必要时补读 `transport`、`lodging` 中的城市级风险。
+- 城市 `elevation_m`：从当前城市已读 chunks 中随读随记；字段完成后仍缺且需要复核时，优先读 `notes`，再回退 `unique_chunk_ids`。`elevation_source_url` 和 `elevation_checked_at` 按 [info-rules.md](info-rules.md) 的海拔信息规则填写。
+- 城市 `source_files`：保留 workspace 已有来源线索，并随当前城市实际采用的 chunks 维护内部来源引用；不为填 `source_files` 单独回读原文。
+- 每日 `summary`、`timeline`、`notes`、`confirmations`：基于已写入的 places、cities 和当天 route 信息整理；只有出现当天执行缺口或高风险冲突时，才回到相关 target 的对应 theme 复核。
+- `global_notes`、`confirm_before_departure`：基于已写入的 places、cities、day-level facts 汇总；只在跨天风险、预约购票、开放状态、道路交通、天气安全等信息不足时，回到相关 target 的对应 theme 复核。
 
 写入展示字段前必须做表达自检。`trip.days[].summary/timeline/notes/confirmations`、`places.*`、`cities.*`、`global_notes` 和 `confirm_before_departure` 中不得出现“材料指出”“材料中的”“材料还提到”“材料提到”“材料显示”“材料写到”“材料中出现”“资料中”“来源”等旁白式溯源。只允许保留必要边界提示，例如 `材料未说明`、`需出行前确认`、`未确认`；冲突字段可以说明“记录时间不一”“说法不一致”。
 
