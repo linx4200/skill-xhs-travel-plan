@@ -20,7 +20,7 @@ RAG 流程的本地照片放在输入的 `rag-index.json` 同级 `photos/` 目�
 
 默认不生成 RAG 召回日志。只有用户明确要求 RAG 召回日志、检索日志或召回原因诊断时，才传 `--log <工作目录>/retrieval-log.json`。日志会按每个 target/theme 记录所有 chunk 的 entity gate、召回状态、向量余弦相似度、分项得分权重和贡献；不会复制完整 embedding 数组。
 
-随后 agent 读取 `retrieval-workspace.json`，按地点、城市和主题整理 `facts-patch.json`，再合并、检查、渲染：
+随后 agent 读取 `retrieval-workspace.json`，按 target 和字段优先读取对应 theme chunks，逐轮整理一次性最小 `facts-patch.json`，再合并、检查、渲染。`facts-patch.json` 只包含当前 target 或当前批次相关路径，不是累计事实文件，也不是完整 `facts-workspace.json` 副本；每轮合并后立即清空或删除。数组字段在 patch 中按完整新数组写入。
 
 ```bash
 npm run apply-facts-patch -- --facts <工作目录>/facts-workspace.json --patch <工作目录>/facts-patch.json
