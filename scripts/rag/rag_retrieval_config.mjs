@@ -6,8 +6,13 @@
  */
 
 /**
- * 景点级检索主题。批量检索会按对象 key 顺序依次把各主题结果加入总阅读池；
- * 阅读池满额后，后面的主题更难贡献新的 chunk。
+ * 景点级检索主题。批量检索会按这里对象 key 的书写顺序，依次把各主题结果加入总阅读池；
+ * 阅读池满额后，后面的主题不再贡献新的 chunk（只把已入池的 chunk 登记进自己的索引），
+ * 被丢弃的数量记在 retrieval_quota.dropped_by_theme 里。
+ *
+ * 因此「主题顺序」就是名额先到先得的顺序：新增、删除或调整这里的 key 会直接改变
+ * 谁先占名额。默认 10 个主题 × placeMaxThemeChunks 5 恰好等于 maxPlaceChunks 50。
+ *
  * 每个 theme 对应一组用于匹配 chunk 标题和正文的中文触发词。
  */
 export const PLACE_THEMES = {
@@ -24,8 +29,9 @@ export const PLACE_THEMES = {
 };
 
 /**
- * 城市级检索主题。批量检索会按对象 key 顺序依次把各主题结果加入总阅读池；
- * 阅读池满额后，后面的主题更难贡献新的 chunk。
+ * 城市级检索主题。收集顺序与名额规则同 PLACE_THEMES：按对象 key 书写顺序先到先得。
+ * 默认 5 个主题 × cityMaxThemeChunks 5 恰好等于 maxCityChunks 25。
+ *
  * 城市主题偏向吃住行、备选点和整体风险提醒。
  */
 export const CITY_THEMES = {
@@ -63,10 +69,13 @@ export const RAG_RETRIEVAL_DEFAULTS = {
 
   // 正式生成：一个景点所有 themes 合起来最多读多少条 chunk。
   // 对应 CLI: --max-place-chunks。
+  // 默认值恰好等于 PLACE_THEMES 主题数 × placeMaxThemeChunks，所以默认不会触发名额丢弃。
+  // 调大 placeMaxThemeChunks 或新增主题后，丢弃会从主题顺序末尾开始，需同步评估这个值。
   maxPlaceChunks: 50,
 
   // 正式生成：一个城市所有 themes 合起来最多读多少条 chunk。
   // 对应 CLI: --max-city-chunks。
+  // 与 maxPlaceChunks 同理，默认值恰好等于 CITY_THEMES 主题数 × cityMaxThemeChunks。
   maxCityChunks: 25,
 
   // keyword_match 计分时最多按多少个命中词归一化；提高会让多词命中更难满分。

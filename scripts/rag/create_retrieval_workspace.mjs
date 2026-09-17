@@ -114,8 +114,11 @@ function chunkRecord(result) {
 
 /**
  * 检索健康状态只描述 RAG 召回质量，不等同于 facts 完整性。
+ *
+ * dropped_by_theme 记录被阅读池名额丢弃的 chunk：这些 chunk 确实被该 theme 命中，
+ * 但没进 unique_chunk_ids，也不会出现在 themes.<theme>[] 里。只给软提醒，不算硬缺口。
  */
-function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResults) {
+function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResults, droppedByTheme = {}) {
   const warnings = [];
   const hardGapReasons = [];
   const minimum =
@@ -124,6 +127,9 @@ function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResul
   else if (uniqueChunkIds.length < minimum) warnings.push(`retrieved_note_chunks_below_${minimum}:${uniqueChunkIds.length}`);
   for (const [theme, results] of Object.entries(themeResults)) {
     if (!results.length) warnings.push(`empty_theme:${theme}`);
+  }
+  for (const [theme, count] of Object.entries(droppedByTheme)) {
+    if (count > 0) warnings.push(`quota_dropped:${theme}:${count}`);
   }
   if (targetType === "city") {
     const cityLevelHits = selectedResults.filter((result) => asList(result.candidate_places).length === 0).length;
@@ -139,25 +145,51 @@ function retrievalHealth(targetType, themeResults, uniqueChunkIds, selectedResul
 }
 
 /**
+ * 阅读池配额账目：谁占满了名额、哪些主题的新 chunk 被丢弃了多少条。
+ *
+ * 默认参数下不会出现丢弃（place 50 名额 / city 25 名额刚好等于候选总量），
+ * dropped_total 为 0 时 dropped_by_theme 为空对象，便于用 `dropped_total > 0` 判断。
+ */
+function retrievalQuota(maxChunks, uniqueChunkIds, droppedByTheme) {
+  const droppedTotal = Object.values(droppedByTheme).reduce((total, count) => total + count, 0);
+  return {
+    max_chunks: maxChunks,
+    selected_chunks: uniqueChunkIds.length,
+    dropped_total: droppedTotal,
+    dropped_by_theme: droppedByTheme,
+  };
+}
+
+/**
  * 对单个景点或城市运行所有默认主题检索，并收集主题结果和去重 chunk_id。
  *
- * 收集顺序等于 PLACE_THEMES / CITY_THEMES 的对象 key 顺序：
- * place 为 highlights -> drawbacks -> tickets -> transport -> routes -> crowds -> accessibility -> facilities -> safety；
- * city 为 foods -> lodging -> transport -> backup_places -> notes。
+ * 收集顺序就是 PLACE_THEMES / CITY_THEMES 的对象 key 顺序。这里不复述主题列表，
+ * 主题顺序、主题数量和下文的名额关系都以 rag_retrieval_config.mjs 为准，避免两处漂移。
  *
- * 每个 theme 会单独调用 retrieve()，先在该 theme 内排序并取 maxThemeChunks。
- * 然后这里按 theme 顺序把结果加入 unique_chunk_ids，并用 selectedIdSet 跨 theme 去重。
- * unique_chunk_ids 到 maxChunks 后，后续 theme 的新 chunk 不再进入阅读池；
- * 但后续 theme 命中已入池的 chunk 时，仍会保留在 themes.<theme>[] 索引里。
+ * 每个 theme 会单独调用 retrieve()，retrieve() 内部已在该 theme 内排序并截断到
+ * topK = maxThemeChunks，所以这里拿到的是「该 theme 内分数最高的前 N 条」。
+ * 然后按 theme 顺序把结果加入 unique_chunk_ids，并用 selectedIdSet 跨 theme 去重。
  *
- * 这里不是把所有 theme 的候选合并后全局排序取 N。
- * 当 maxThemeChunks > maxChunks 时，前面的 theme 可能直接占满 N 个名额，后面的 theme 很难贡献新 chunk。
+ * 名额先到先得：unique_chunk_ids 是跨主题共享的阅读池，上限 maxChunks。
+ * - 新 chunk 且池未满 -> 入池并占用一个名额；
+ * - 新 chunk 但池已满 -> 丢弃，既不入池也不写入 themes.<theme>[] 索引，
+ *   只累加到 dropped_by_theme 计数；
+ * - 已入池的 chunk 再次被后续 theme 命中 -> 不占新名额，但仍写入 themes.<theme>[] 索引。
+ * 最后一条是这里用 continue 而不是 break 的原因：池满后仍要扫完后序 theme，
+ * 让它们能把已入池的 chunk 登记进自己的索引。
+ *
+ * 这里不是把所有 theme 的候选合并后全局排序取 N。跨 theme 的 score 由各自
+ * theme 独立算分，互相不可比，所以占位顺序实际由「主题顺序」决定而不是「全局分数」。
+ * 默认参数下 place 是 10 theme × 5 = 50、city 是 5 theme × 5 = 25，恰好等于
+ * maxPlaceChunks / maxCityChunks，因此默认不会发生丢弃；一旦调大 --place-top-k /
+ * --city-top-k 或往配置里新增主题，丢弃就会发生，且总是从主题顺序末尾的主题开始。
  */
 async function collectThemeResults(index, entityType, name, themes, maxThemeChunks, maxChunks, options = {}) {
   const themeResults = {};
   const selectedIds = [];
   const selectedIdSet = new Set();
   const selectedById = new Map();
+  const droppedByTheme = {};
 
   for (const theme of Object.keys(themes)) {
     const result = await retrieve(index, {
@@ -178,15 +210,17 @@ async function collectThemeResults(index, entityType, name, themes, maxThemeChun
       });
     }
     const kept = [];
-    for (const item of result.results.slice(0, maxThemeChunks)) {
+    for (const item of result.results) {
       if (!selectedIdSet.has(item.chunk_id)) {
-        if (selectedIds.length >= maxChunks) continue;
+        if (selectedIds.length >= maxChunks) {
+          droppedByTheme[theme] = (droppedByTheme[theme] ?? 0) + 1;
+          continue;
+        }
         selectedIdSet.add(item.chunk_id);
         selectedIds.push(item.chunk_id);
         selectedById.set(item.chunk_id, item);
       }
       kept.push(item);
-      if (!selectedById.has(item.chunk_id)) selectedById.set(item.chunk_id, item);
     }
     themeResults[theme] = kept;
   }
@@ -195,6 +229,7 @@ async function collectThemeResults(index, entityType, name, themes, maxThemeChun
     themeResults,
     unique_chunk_ids: selectedIds,
     selected_results: selectedIds.map((id) => selectedById.get(id)).filter(Boolean),
+    dropped_by_theme: droppedByTheme,
   };
 }
 
@@ -280,7 +315,7 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
   const chunksById = {};
   const places = {};
   for (const place of Object.keys(facts.places ?? {})) {
-    const { themeResults, unique_chunk_ids, selected_results } = await collectThemeResults(
+    const { themeResults, unique_chunk_ids, selected_results, dropped_by_theme } = await collectThemeResults(
       index,
       "place",
       place,
@@ -293,14 +328,15 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
     places[place] = {
       target: placeTarget(facts, place),
       unique_chunk_ids,
-      retrieval_health: retrievalHealth("place", themeResults, unique_chunk_ids, selected_results),
+      retrieval_health: retrievalHealth("place", themeResults, unique_chunk_ids, selected_results, dropped_by_theme),
+      retrieval_quota: retrievalQuota(maxPlaceChunks, unique_chunk_ids, dropped_by_theme),
       themes: themeIndexes(themeResults),
     };
   }
 
   const cities = {};
   for (const city of Object.keys(facts.cities ?? {})) {
-    const { themeResults, unique_chunk_ids, selected_results } = await collectThemeResults(
+    const { themeResults, unique_chunk_ids, selected_results, dropped_by_theme } = await collectThemeResults(
       index,
       "city",
       city,
@@ -313,7 +349,8 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
     cities[city] = {
       target: cityTarget(facts, city),
       unique_chunk_ids,
-      retrieval_health: retrievalHealth("city", themeResults, unique_chunk_ids, selected_results),
+      retrieval_health: retrievalHealth("city", themeResults, unique_chunk_ids, selected_results, dropped_by_theme),
+      retrieval_quota: retrievalQuota(maxCityChunks, unique_chunk_ids, dropped_by_theme),
       themes: themeIndexes(themeResults),
     };
   }
