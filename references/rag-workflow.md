@@ -105,7 +105,7 @@ node scripts/apply_facts_patch.mjs \
   --patch <工作目录>/facts-patch.json
 ```
 
-`facts-patch.json` 是当前轮次的最小临时变更载体，不是累计事实文件，也不是完整 `facts-workspace.json` 副本。每轮 patch 合并后立即清空或删除，下一轮重新生成。当前合并脚本对数组执行整体替换，因此 patch 中被修改的数组必须写完整新数组。
+`facts-patch.json` 是当前轮次的最小临时变更载体，不是累计事实文件，也不是完整 `facts-workspace.json` 副本。每轮 patch 只包含当前 target 或当前批次相关路径，不包含其他未处理 target。每轮 patch 合并后立即清空或删除，下一轮重新生成。当前合并脚本对数组执行整体替换，因此 patch 中被修改的数组必须写完整新数组。
 
 处理顺序：
 
@@ -164,6 +164,58 @@ node scripts/apply_facts_patch.mjs \
 - 只输出当前 target 或当前批次的最小 facts JSON 片段。
 - 数组字段输出完整新数组。
 - 不输出解释、检索过程或未采用素材清单。
+```
+
+最小 patch 示例：
+
+单个地点 patch 只包含当前地点相关路径。示例中 `highlights` 和 `tickets` 都是完整新数组，合并时会整体替换对应字段。
+
+```json
+{
+  "places": {
+    "赛里木湖": {
+      "summary": "湖区以环湖观景和湖岸停留为主，适合作为当天重点观景点。",
+      "highlights": [
+        "优先安排湖边观景和短暂停留，天气好时湖面、雪山和草坡层次更明显。"
+      ],
+      "tickets": [
+        "门票、区间车和自驾进入规则需要出行前确认，以景区当天公告为准。"
+      ],
+      "source_files": [
+        "notes/赛里木湖.md"
+      ]
+    }
+  }
+}
+```
+
+day-level patch 只包含当天需要更新的数组字段。示例中 `trip.days` 必须写完整新数组，未修改的 day 也要保留原值，避免数组整体替换时丢失其他天。
+
+```json
+{
+  "trip": {
+    "days": [
+      {
+        "day": 1,
+        "date": "2026-10-01",
+        "title": "抵达伊宁",
+        "lodging_city": "伊宁",
+        "summary": "当天以抵达和补给为主，减少长距离景点安排。",
+        "route_places": [],
+        "timeline": [
+          "抵达后先完成取车、补给和住宿入住。"
+        ],
+        "notes": [
+          "当天不安排强执行景点，给后续长线自驾预留体力。"
+        ],
+        "confirmations": [
+          "出发前确认租车取车时间、证件和押金规则。"
+        ],
+        "source_line": "D1 抵达伊宁"
+      }
+    ]
+  }
+}
 ```
 
 写入展示字段前必须做表达自检。`trip.days[].summary/timeline/notes/confirmations`、`places.*`、`cities.*`、`global_notes` 和 `confirm_before_departure` 中不得出现“材料指出”“材料中的”“材料还提到”“材料提到”“材料显示”“材料写到”“材料中出现”“资料中”“来源”等旁白式溯源。只允许保留必要边界提示，例如 `材料未说明`、`需出行前确认`、`未确认`；冲突字段可以说明“记录时间不一”“说法不一致”。
