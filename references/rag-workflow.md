@@ -146,6 +146,26 @@ node scripts/apply_facts_patch.mjs \
 - 每日 `summary`、`timeline`、`notes`、`confirmations`：基于已写入的 places、cities 和当天 route 信息整理；只有出现当天执行缺口或高风险冲突时，才回到相关 target 的对应 theme 复核。
 - `global_notes`、`confirm_before_departure`：基于已写入的 places、cities、day-level facts 汇总；只在跨天风险、预约购票、开放状态、道路交通、天气安全等信息不足时，回到相关 target 的对应 theme 复核。
 
+字段级 prompt 模板：
+
+```text
+目标 target：<places.地点名 或 cities.城市名>
+目标字段：<本轮要填写的 facts 字段列表>
+读取范围：仅使用本轮选定的 theme chunk_id 对应 chunks；未触发兜底条件时不读取完整 unique_chunk_ids。
+写入要求：
+- 只提取对本次路线有执行价值、展示价值或必须确认的信息。
+- 删除重复内容，合并同义表达，保留真实冲突。
+- 不使用常识补齐材料未说明的内容。
+- 不复制 chunk 原文，不写 chunk_id、score、matched_by 或大段 evidence。
+- 不写“材料指出”“材料中的”“材料还提到”“材料提到”“材料显示”“材料写到”“材料中出现”“资料中”“来源”等旁白式溯源。
+- 只在事实边界确实需要时保留“材料未说明”“需出行前确认”“未确认”；冲突信息写“记录时间不一”“说法不一致”等执行判断。
+- 若已读 chunk 出现当前 target 的海拔数值，按海拔信息规则写入对应 elevation 字段。
+输出要求：
+- 只输出当前 target 或当前批次的最小 facts JSON 片段。
+- 数组字段输出完整新数组。
+- 不输出解释、检索过程或未采用素材清单。
+```
+
 写入展示字段前必须做表达自检。`trip.days[].summary/timeline/notes/confirmations`、`places.*`、`cities.*`、`global_notes` 和 `confirm_before_departure` 中不得出现“材料指出”“材料中的”“材料还提到”“材料提到”“材料显示”“材料写到”“材料中出现”“资料中”“来源”等旁白式溯源。只允许保留必要边界提示，例如 `材料未说明`、`需出行前确认`、`未确认`；冲突字段可以说明“记录时间不一”“说法不一致”。
 
 ## Step 6：字段级缺口检查
