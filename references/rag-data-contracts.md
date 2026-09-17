@@ -68,9 +68,13 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 - `target.type`、`target.name`、`target.days`、`target.source_files_count`：检索目标元信息。
 - `unique_chunk_ids`：该 target 跨主题去重后的 chunk 阅读顺序。Agent 初次填该地点或城市 facts 时按此数组到顶层 `chunks_by_id` 读取原文。
 - `retrieval_health.status`：`ok`、`weak` 或 `empty`。只描述 RAG 召回质量，不等同于 facts 完整性。
-- `retrieval_health.warnings`：召回偏少、主题为空或城市检索过泛等软提醒。
+- `retrieval_health.warnings`：召回偏少、主题为空、城市检索过泛或配额丢弃等软提醒。配额丢弃的格式为 `quota_dropped:<theme>:<count>`。
 - `retrieval_health.hard_gap_reasons`：明确无法依赖 RAG 的原因，例如完全没有召回。
+- `retrieval_quota.max_chunks`、`selected_chunks`：该 target 的阅读池上限与实际入池数量。
+- `retrieval_quota.dropped_total`、`dropped_by_theme`：被阅读池名额丢弃的 chunk 数量，按主题归集。这些 chunk 确实被对应主题命中，但既不在 `unique_chunk_ids` 里，也不在 `themes.<theme>[]` 索引里。默认参数下为 0 和 `{}`。
 - `themes.<theme>[]`：主题命中索引；每项只包含 `chunk_id`、`score` 和 `matched_by`。
+
+阅读池名额按主题顺序先到先得：各主题按 `themes` 的 key 顺序依次入池，池满后新 chunk 一律丢弃（记录到 `retrieval_quota`），已入池的 chunk 仍会登记进后序主题的索引。默认参数下 place 为 10 个主题 × 每个主题 5 条 = 50、city 为 5 × 5 = 25，恰好等于 `max_place_chunks` / `max_city_chunks`，因此默认不产生丢弃；调大 `--place-top-k` / `--city-top-k` 或新增主题后才会触发，且总是从主题顺序末尾开始。
 
 `summary` 字段：
 

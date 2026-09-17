@@ -87,9 +87,11 @@ Embedding 配置规则：
 `retrieval-workspace.json` 应包含：
 
 - 顶层 `chunks_by_id`，保存本次批量检索命中的唯一 chunk 原文。
-- `places.<地点名>.target`、`unique_chunk_ids`、`retrieval_health` 和 `themes`。
-- `cities.<城市名>.target`、`unique_chunk_ids`、`retrieval_health` 和 `themes`。
+- `places.<地点名>.target`、`unique_chunk_ids`、`retrieval_health`、`retrieval_quota` 和 `themes`。
+- `cities.<城市名>.target`、`unique_chunk_ids`、`retrieval_health`、`retrieval_quota` 和 `themes`。
 - `summary.attention_places`、`attention_cities`、`gap_places` 和 `gap_cities`。
+
+`retrieval_quota.dropped_total > 0` 表示阅读池名额按主题顺序被先到的主题占满，该 target 有 chunk 被丢弃；丢弃的主题记在 `dropped_by_theme`，同时出现在 `retrieval_health.warnings` 的 `quota_dropped:<theme>:<count>` 里。遇到这种 target 时不要直接按 `unique_chunk_ids` 判断「该主题没有素材」，必要时用 `scripts/rag/rag_retrieve.mjs --theme <theme>` 定向补检索。
 
 默认不生成 `retrieval-log.json`。只有用户明确要求时，才追加 `--log <工作目录>/retrieval-log.json`。日志面向调试和调参，不作为 facts 填充的事实来源。
 
