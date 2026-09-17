@@ -54,6 +54,8 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 - `cities`：城市 target 的检索阅读包。
 - `summary`：批量检索覆盖数量和需要关注的 target。
 
+`retrieval-workspace.json` 的阅读方向保持 target-first：agent 先选择一个 `places.<地点名>` 或 `cities.<城市名>`，再按当前字段优先读取该 target 下的 `themes.<theme>[]`，最后到顶层 `chunks_by_id` 取原文。`unique_chunk_ids` 是 target 级兜底阅读池，不是默认全量阅读入口。
+
 `chunks_by_id.<chunk_id>` 字段：
 
 - `chunk_id`
@@ -66,20 +68,20 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 `places.<地点名>` 和 `cities.<城市名>` 字段：
 
 - `target.type`、`target.name`、`target.days`、`target.source_files_count`：检索目标元信息。
-- `unique_chunk_ids`：该 target 跨主题去重后的 chunk 阅读顺序。Agent 初次填该地点或城市 facts 时按此数组到顶层 `chunks_by_id` 读取原文。
-- `retrieval_health.status`：`ok`、`weak` 或 `empty`。只描述 RAG 召回质量，不等同于 facts 完整性。
+- `unique_chunk_ids`：该 target 跨主题去重后的兜底阅读池。只有对应 theme 为空、信息不足、信息互相冲突、字段需要跨 theme 综合判断，或高风险执行字段需要复核时，agent 才按此数组到顶层 `chunks_by_id` 读取原文。
+- `retrieval_health.status`：`ok`、`weak` 或 `empty`。只描述 RAG 召回质量，不等同于 facts 完整性或字段完整性。
 - `retrieval_health.warnings`：召回偏少、主题为空、城市检索过泛或配额丢弃等软提醒。配额丢弃的格式为 `quota_dropped:<theme>:<count>`。
 - `retrieval_health.hard_gap_reasons`：明确无法依赖 RAG 的原因，例如完全没有召回。
 - `retrieval_quota.max_chunks`、`selected_chunks`：该 target 的阅读池上限与实际入池数量。
-- `retrieval_quota.dropped_total`、`dropped_by_theme`：被阅读池名额丢弃的 chunk 数量，按主题归集。这些 chunk 确实被对应主题命中，但既不在 `unique_chunk_ids` 里，也不在 `themes.<theme>[]` 索引里。默认参数下为 0 和 `{}`。
-- `themes.<theme>[]`：主题命中索引；每项只包含 `chunk_id`、`score` 和 `matched_by`。
+- `retrieval_quota.dropped_total`、`dropped_by_theme`：被阅读池名额丢弃的 chunk 数量，按主题归集。这些 chunk 确实被对应主题命中，但既不在 `unique_chunk_ids` 里，也不在 `themes.<theme>[]` 索引里。默认参数下为 0 和 `{}`。当该值大于 0 时，agent 不得直接判断对应字段没有素材；字段缺口或高风险事项需要用单点检索定向复核。
+- `themes.<theme>[]`：字段优先阅读索引；每项只包含 `chunk_id`、`score` 和 `matched_by`。agent 填写与该 theme 对应的字段时，优先按这里的 `chunk_id` 到 `chunks_by_id` 读取原文。
 
 阅读池名额按主题顺序先到先得：各主题按 `themes` 的 key 顺序依次入池，池满后新 chunk 一律丢弃（记录到 `retrieval_quota`），已入池的 chunk 仍会登记进后序主题的索引。默认参数下 place 为 10 个主题 × 每个主题 5 条 = 50、city 为 5 × 5 = 25，恰好等于 `max_place_chunks` / `max_city_chunks`，因此默认不产生丢弃；调大 `--place-top-k` / `--city-top-k` 或新增主题后才会触发，且总是从主题顺序末尾开始。
 
 `summary` 字段：
 
 - `place_count`、`city_count`：本次批量检索覆盖的 target 数量。
-- `attention_places`、`attention_cities`：`retrieval_health.status` 非 `ok` 或存在硬缺口的 target；供 agent 优先检查。
+- `attention_places`、`attention_cities`：`retrieval_health.status` 非 `ok` 或存在硬缺口的 target；供 agent 优先检查召回质量，不表示这些 target 的 facts 字段一定不完整。
 - `gap_places`、`gap_cities`：存在硬缺口原因的 target。
 
 检索排序约束：
@@ -88,7 +90,7 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 - 带 `city` 的检索只召回 `candidate_cities` 命中目标城市的 chunk，并对同时绑定 `candidate_places` 的地点级 chunk 施加 theme-sensitive 软惩罚。
 - 若 chunks 含 embedding，则 query embedding 相似度参与主题候选池内排序；标题/正文关键词、实体、标题来源分和来源 penalty 保留为可解释排序信号。
 
-Agent 填 facts 时按 `unique_chunk_ids` 到顶层 `chunks_by_id` 读取原文，再用 `themes` 辅助定位字段。若 chunk 中出现本次行程城市或地点的海拔数值，必须写入对应 facts 目标的 `elevation_m`。不要把 `text`、`score`、`matched_by` 或大段 evidence 写入最终 `facts-workspace.json`。
+Agent 填 facts 时按字段优先读取 `themes.<theme>[]` 的 chunk_id，再到顶层 `chunks_by_id` 读取原文；`unique_chunk_ids` 只在 theme 为空、信息不足、冲突、综合判断或高风险复核时作为兜底。若已读 chunk 中出现本次行程城市或地点的海拔数值，必须写入对应 facts 目标的 `elevation_m`。不要把 `text`、`score`、`matched_by` 或大段 evidence 写入最终 `facts-workspace.json`。
 
 ## retrieval-log.json
 
