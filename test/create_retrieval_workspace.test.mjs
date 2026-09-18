@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { createRetrievalWorkspace } from "../scripts/rag/create_retrieval_workspace.mjs";
-import { RAG_SCORING } from "../scripts/rag/rag_retrieval_config.mjs";
+import { RAG_RERANK_DEFAULTS, RAG_SCORING } from "../scripts/rag/rag_retrieval_config.mjs";
 
 // 每个 place theme 取一个只在该 theme 词表里出现的触发词，保证「一个 chunk 只被一个主题强命中」。
 const ONE_TERM_PER_PLACE_THEME = {
@@ -98,6 +98,49 @@ function writeCityFixture() {
   return { factsPath, ragIndexPath };
 }
 
+function writeRerankFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "retrieval-workspace-rerank-test-"));
+  const factsPath = path.join(dir, "facts-workspace.json");
+  const ragIndexPath = path.join(dir, "rag-index.json");
+
+  fs.writeFileSync(
+    factsPath,
+    JSON.stringify({ places: { A地方: { source_files: [] } }, cities: {} }),
+    "utf8",
+  );
+  fs.writeFileSync(
+    ragIndexPath,
+    JSON.stringify({
+      schema_version: 1,
+      chunks: [
+        {
+          chunk_id: "viewpoint",
+          source_uri: "resources/viewpoint.json",
+          resource_path: "viewpoint.json",
+          title: "A地方观景台",
+          text: "看点 出片 景观 云海。",
+          candidate_places: ["A地方"],
+          candidate_cities: [],
+          embedding: [],
+        },
+        {
+          chunk_id: "lodging",
+          source_uri: "resources/lodging.json",
+          resource_path: "lodging.json",
+          title: "A地方住宿",
+          text: "住宿 民宿 餐饮。",
+          candidate_places: ["A地方"],
+          candidate_cities: [],
+          embedding: [],
+        },
+      ],
+    }),
+    "utf8",
+  );
+
+  return { factsPath, ragIndexPath };
+}
+
 /**
  * 引用完整性：unique_chunk_ids 和 themes.*[].chunk_id 都必须能在 chunks_by_id 里找到，
  * 且 chunks_by_id 不应残留没有任何 target 引用的 chunk。
@@ -144,6 +187,20 @@ test("阅读池名额足够时不会丢弃任何 chunk", async () => {
       default: RAG_SCORING.defaultCityTilt,
       by_theme: RAG_SCORING.cityTiltByTheme,
     },
+  });
+  assert.deepEqual(workspace.retrieval.scoring.rerank, {
+    enabled: false,
+    url: RAG_RERANK_DEFAULTS.url,
+    model_id: RAG_RERANK_DEFAULTS.model,
+    recall_width: RAG_RERANK_DEFAULTS.recallWidth,
+    probability_threshold: RAG_RERANK_DEFAULTS.probThreshold,
+    theme_scope: {
+      place: RAG_RERANK_DEFAULTS.highRiskThemes.place,
+      city: RAG_RERANK_DEFAULTS.highRiskThemes.city,
+      all_themes: false,
+    },
+    threshold_filtering: true,
+    business_rules_preserved: true,
   });
   assert.deepEqual(workspace.retrieval.scoring.weights.entity_query, {
     keyword_match: 0.55,
@@ -205,5 +262,83 @@ test("城市地点级解释字段会进入 theme 轻量索引", async () => {
   assert.equal(placeSpecific.tier, 1);
   assert.equal(Object.hasOwn(placeSpecific, "tilt_multiplier"), false);
   assert.equal(Object.hasOwn(placeSpecific, "final_rerank_score"), false);
+  assertReferenceIntegrity(workspace);
+});
+
+test("rerank options are passed through and metadata is published without leaking probabilities", async () => {
+  const { factsPath, ragIndexPath } = writeRerankFixture();
+  const calls = [];
+  const logRequests = [];
+  const workspace = await createRetrievalWorkspace(factsPath, ragIndexPath, {
+    noEmbedding: true,
+    placeTopK: 2,
+    maxPlaceChunks: 2,
+    logRequests,
+    // 这里模拟 workspace 层也存在 themes 字段；它不能被当成 rerank 额外白名单。
+    themes: ["drawbacks"],
+    rerank: true,
+    rerankUrl: "http://127.0.0.1:11435/rerank",
+    rerankModel: "test-reranker",
+    rerankThemes: ["tickets"],
+    rerankRecallWidth: 2,
+    rerankThreshold: 0.9,
+    rerankTimeoutMs: 5000,
+    reranker: async ({ query, documents }) => {
+      calls.push({ query, ids: documents.map((document) => document.id) });
+      return documents.map((document) => ({
+        id: document.id,
+        probability: document.id === "viewpoint" ? 0.99 : 0.1,
+      }));
+    },
+  });
+
+  assert.ok(calls.some((call) => call.query === "A地方有哪些值得专门停留、拍照或体验的景观亮点和游玩看点？"));
+  assert.equal(calls.some((call) => call.query.includes("drawbacks")), false);
+  assert.equal(workspace.retrieval.scoring.strategy, "candidate_gated_keyword_entity_title_rerank");
+  assert.equal(workspace.retrieval.scoring.rerank.enabled, true);
+  assert.equal(workspace.retrieval.scoring.rerank.model_id, "test-reranker");
+  assert.equal(workspace.retrieval.scoring.rerank.recall_width, 2);
+  assert.equal(workspace.retrieval.scoring.rerank.probability_threshold, 0.9);
+  assert.deepEqual(workspace.retrieval.scoring.rerank.theme_scope, {
+    place: [...RAG_RERANK_DEFAULTS.highRiskThemes.place, "tickets"],
+    city: [...RAG_RERANK_DEFAULTS.highRiskThemes.city, "tickets"],
+    all_themes: false,
+  });
+
+  const highlights = workspace.places["A地方"].themes.highlights;
+  assert.deepEqual(
+    highlights.map((item) => item.chunk_id),
+    ["viewpoint"],
+  );
+  assert.equal(Object.hasOwn(highlights[0], "rerank_probability"), false);
+  assert.equal(Object.hasOwn(highlights[0], "final_rerank_score"), false);
+  assert.equal(Object.hasOwn(highlights[0], "tilt_multiplier"), false);
+  assert.equal(logRequests.find((request) => request.theme === "highlights").rerank.applied, true);
+  assertReferenceIntegrity(workspace);
+});
+
+test("rerank all-themes scope is explicit and threshold-empty themes emit warnings", async () => {
+  const { factsPath, ragIndexPath } = writeRerankFixture();
+  const workspace = await createRetrievalWorkspace(factsPath, ragIndexPath, {
+    noEmbedding: true,
+    placeTopK: 2,
+    maxPlaceChunks: 2,
+    rerank: {
+      enabled: true,
+      allThemes: true,
+      recallWidth: 2,
+      probThreshold: 0.9,
+      reranker: async ({ documents }) => documents.map((document) => ({ id: document.id, probability: 0.1 })),
+    },
+  });
+
+  assert.equal(workspace.retrieval.scoring.rerank.enabled, true);
+  assert.deepEqual(workspace.retrieval.scoring.rerank.theme_scope, {
+    place: RAG_RERANK_DEFAULTS.highRiskThemes.place,
+    city: RAG_RERANK_DEFAULTS.highRiskThemes.city,
+    all_themes: true,
+  });
+  assert.deepEqual(workspace.places["A地方"].themes.highlights, []);
+  assert.ok(workspace.places["A地方"].retrieval_health.warnings.includes("empty_theme:highlights"));
   assertReferenceIntegrity(workspace);
 });
