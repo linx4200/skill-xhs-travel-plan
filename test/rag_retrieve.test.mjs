@@ -284,6 +284,84 @@ test("rerank keeps backup places tier above higher probability place-specific ch
   assert.equal(result.diagnostics.rerank.items.find((item) => item.chunk_id === "place-backup").final_rerank_score, 0.99);
 });
 
+test("highlights rerank uses the fixed query and filters off-theme chunks without changing result.score", async () => {
+  const highlightsIndex = {
+    chunks: [
+      {
+        chunk_id: "scenic-highlight",
+        source_uri: "resources/scenic-highlight.json",
+        resource_path: "scenic-highlight.json",
+        title: "A地方景观亮点",
+        text: "A地方看点很多，云海和观景台都很出片。",
+        candidate_places: ["A地方"],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+      {
+        chunk_id: "lodging-note",
+        source_uri: "resources/lodging-note.json",
+        resource_path: "lodging-note.json",
+        title: "A地方住宿",
+        text: "A地方附近有民宿，住宿位置方便。",
+        candidate_places: ["A地方"],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+      {
+        chunk_id: "food-note",
+        source_uri: "resources/food-note.json",
+        resource_path: "food-note.json",
+        title: "A地方餐饮",
+        text: "A地方附近可以吃饭，也有咖啡店。",
+        candidate_places: ["A地方"],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+    ],
+  };
+  const calls = [];
+
+  const result = await retrieve(highlightsIndex, {
+    place: "A地方",
+    theme: "highlights",
+    topK: 3,
+    includeDiagnostics: true,
+    rerank: {
+      enabled: true,
+      probThreshold: 0.9,
+      recallWidth: 3,
+      reranker: async ({ query, documents }) => {
+        calls.push({ query, ids: documents.map((document) => document.id) });
+        return documents.map((document) => ({
+          id: document.id,
+          probability: document.id === "scenic-highlight" ? 0.99 : 0.1,
+        }));
+      },
+    },
+  });
+
+  assert.deepEqual(
+    result.results.map((item) => item.chunk_id),
+    ["scenic-highlight"],
+  );
+  assert.equal(calls[0].query, "A地方有哪些值得专门停留、拍照或体验的景观亮点和游玩看点？");
+  assert.deepEqual(calls[0].ids.sort(), ["food-note", "lodging-note", "scenic-highlight"]);
+  assert.equal(result.diagnostics.rerank.applied, true);
+  assert.equal(result.diagnostics.rerank.filtered_count, 2);
+  assert.equal(result.diagnostics.chunks.find((item) => item.chunk_id === "lodging-note").recall_status, "reranked_filtered");
+  assert.equal(result.diagnostics.chunks.find((item) => item.chunk_id === "food-note").recall_status, "reranked_filtered");
+
+  const scenicDiagnostic = result.diagnostics.chunks.find((item) => item.chunk_id === "scenic-highlight");
+  assert.equal(result.results[0].score, scenicDiagnostic.score.total);
+  assert.notEqual(result.results[0].score, 0.99);
+  for (const chunk of result.diagnostics.chunks) {
+    assert.equal(Object.hasOwn(chunk.business, "tier"), true);
+    assert.equal(Object.hasOwn(chunk.business, "tilt_multiplier"), true);
+    assert.equal(Object.hasOwn(chunk.business, "is_video"), true);
+    assert.equal(Object.hasOwn(chunk.business, "place_specific"), true);
+  }
+});
+
 test("city retrieval does not fall back to title or text city matches without candidate_cities", async () => {
   const result = await retrieve(index, { city: "乙城市", theme: "lodging", topK: 10 });
   assert.deepEqual(
