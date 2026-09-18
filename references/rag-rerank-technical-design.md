@@ -154,6 +154,21 @@ export const RAG_RERANK_DEFAULTS = {
 - `probThreshold` 作为主题相关性门槛；阈值过滤后不足 `topK` 时直接返回较少条数。
 - `queryTemplates` 是固定模板表，只用于 rerank API，不改变 embedding query；没有模板的 theme 使用固定兜底句。
 - `highRiskThemes` 是第一阶段白名单。非白名单 theme 不调用模型。
+- 白名单之外另有 `allThemes`（`--rerank-all-themes`）与 `extraThemes`（`--rerank-theme`）两个扩展开关，默认关闭，语义见「启用策略」。
+
+`probThreshold` 默认 `0.9` 的取值依据（预研实测，详见 `references/rag-rerank-plan.md` 4.2）：
+
+| 预研实测 | 数值 |
+|---|---|
+| rerank 分数极差 | 0.97（`0.03` ~ `0.998`） |
+| rerank 后 top-5 内部差异 | **0.0003**（`0.9995` ~ `0.9998`） |
+
+第二行决定了阈值的定位：同主题候选的概率会挤在 `0.99+` 的饱和区，**模型可靠的能力是区分「主题对得上 / 对不上」，不是精排 1、2、3、4、5 的顺序**。所以方案不用 rerank 分数精排，只把它当主题相关性闸门 —— `0.9` 落在饱和簇下方，放过同主题内容，切掉长尾里的跨主题误召回。判定规则是 `probability >= probThreshold`，等于阈值时保留。
+
+两点已知限制：
+
+- 这个数字是预研期的经验值，未做过多档扫描，只在 `highlights` 上验证过效果。
+- 当前实现是**全局单一标量**，不区分 theme 与实体类型。若阶段 8 的概率分布显示各 theme 的天然断层位置不同，需要把 `probThreshold` 扩展为可按 `entity.type + theme` 覆盖 —— 属配置结构改动。
 
 ### 修改 `scripts/rag/rag_retrieve.mjs`
 
@@ -196,6 +211,8 @@ const reranked = await maybeRerankRows(rankedRows, {
 const selectedRows = reranked.rows.slice(0, topK);
 ```
 
+另新增 `businessPenaltyMultiplier(signals, weights)` 与常量 `MIN_BUSINESS_PENALTY_MULTIPLIER`；`scoreChunk()` 的返回值在 `score` / `matches` / `breakdown` 之外**平级**增加 `businessPenaltyMultiplier`（不进 `breakdown`——那个对象的契约是「每个信号 × 权重 = 贡献」，插入非贡献值会破坏可加性）。折算规则见「排序后处理规则」。
+
 排序后处理规则：
 
 - rerank 只改变参与 rerank 窗口内 rows 的顺序和过滤状态。
@@ -212,6 +229,12 @@ businessPenalty = 1
 
 final_rerank_score = rerank_probability * clamp(businessPenalty, 0.01, 1)
 ```
+
+**实现位置**：这个折算的函数体住在主流程 `scripts/rag/rag_retrieve.mjs`（`businessPenaltyMultiplier(signals, weights)`，下限常量 `MIN_BUSINESS_PENALTY_MULTIPLIER`），由 `scoreChunk()` 与 `score` / `matches` / `breakdown` 平级输出 `businessPenaltyMultiplier`。rerank 模块不重写这个公式，只读 `row.scored.businessPenaltyMultiplier` 相乘（缺失或非有限数按 1）。
+
+这样分工的理由：rerank 是旁支，业务 penalty 是主流程规则。折算若写在 rerank 侧，主流程新增第三条 penalty 时旁支不会跟着变——rerank 启用时那条规则静默失效。
+
+clamp 上限 1 只对「降权」语义成立。当前两条 penalty 都是负向，没有问题；将来若要加正向修正信号（例如官方来源加权），上限会把它切掉，改动时需一并调整。
 
 公式只用于 rerank 后排序，不写入普通 `result.score` 覆盖现有综合分。`result.score` 保留原始检索分，便于兼容现有 workspace 和测试；rerank 细节只进入诊断日志和 `retrieval.scoring` 元信息。
 
@@ -243,7 +266,8 @@ final_rerank_score = rerank_probability * clamp(businessPenalty, 0.01, 1)
     "probability_threshold": 0.9,
     "theme_scope": {
       "place": ["highlights", "nearby", "facilities"],
-      "city": ["backup_places"]
+      "city": ["backup_places"],
+      "all_themes": false
     },
     "threshold_filtering": true,
     "business_penalties_preserved": [
@@ -255,6 +279,8 @@ final_rerank_score = rerank_probability * clamp(businessPenalty, 0.01, 1)
 ```
 
 `themes.<theme>[]` 保持只写 `chunk_id`、`score`、`matched_by`。rerank 不把概率写入 `retrieval-workspace.json` 的常规阅读索引，避免 agent 把模型概率当作事实依据。
+
+`theme_scope` 由 `rerankThemeScope()` 生成，直接照抄上述结构。`all_themes` 反映是否处于 `--rerank-all-themes` 模式：为 `true` 时 `place` / `city` 两个列表仍照常输出，但**已不代表本次实际启用范围**，消费方必须以 `all_themes` 为准。
 
 ### 外部 rerank 服务契约
 
@@ -368,6 +394,11 @@ doc 使用 chunk 的标题和正文：
 
 - 景点：`highlights`、`nearby`、`facilities`
 - 城市：`backup_places`
+
+白名单之外的 theme 默认不调用模型。需要临时扩大范围时有两个显式开关，默认都关闭：
+
+- `--rerank-theme <theme>`：把该 theme **同时**加入景点与城市两套白名单，最终是否命中由请求时的 `entity.type` 决定。它绕过了「按实体类型限定白名单」的语义，定位是调参便利，不是常规运行路径。
+- `--rerank-all-themes`：本次调用对全部 theme 放行，用于调参对比；此时 `theme_scope.all_themes` 为 `true`。
 
 单点调试：
 
@@ -555,3 +586,24 @@ node scripts/rag/rag_retrieve.mjs \
 - 依赖下载不稳定：模型下载和缓存由全局 rerank 服务负责，项目侧不管理依赖源。
 - 日志体积膨胀：普通 workspace 不写 rerank item，只有 `--log` 写详细诊断。
 - 配额问题仍存在：第一阶段不处理跨 theme 阅读池保底；当 `retrieval_quota.dropped_total > 0` 时，agent 按现有规则定向补检索。
+
+## 落地差异（阶段 4–5）
+
+本方案在实现时对模块设计、诊断字段和错误处理做了若干收敛。以下列出与本文正文**不一致**的点，以及正文未描述、但落地时必须知道的实现细节；逐条原因和验证记录见 `references/rag-rerank-execution-plan.md` 的阶段 4 / 阶段 5「实现偏离」表，按本文写代码前请先看那两张表。
+
+### 模块与传输
+
+- **导出面**：「模块设计」只声明 `rerankRows()`，实际另导出 `resolveRerankConfig` / `rerankThemeScope` / `isThemeInScope` / `buildRerankQuery` / `buildRerankDocument`，供阶段 6 取 `theme_scope` 元信息和单元测试直接调用。
+- **`config` 字段**：除本文列出的键外，另兼容 CLI 别名 `rerankUrl` / `rerankModel` / `rerankRecallWidth` / `rerankThreshold` / `rerankTimeoutMs` / `rerankAllThemes` / `rerankTheme`，并新增传输层注入点 `httpClient({url, body, timeoutMs})`（注入时跳过 URL 校验）。`reranker` 的实际入参是 `({ model, query, documents })`，返回项支持纯数字 / `{probability}` / `{id, probability}`。
+- **`diagnostics` 字段**：除本文列出的键外，另增 `rerank_query`、`filtered_count`、`out_of_window_count`；`skipped_reason` 另增 `disabled`（未启用）与 `missing_entity`（`--query` 无实体）两种取值。
+- **doc 构造**：不再拼 `标题：…\n正文：…` 单字符串，改为 `{ id, title, text }` 分字段传给服务；`maxDocChars` 只截断 `text`，`text` 为空时退回 `title`。模型 prompt 拼装完全由服务负责。
+- **penalty 折算归属**：「推荐后处理公式」的函数体现定义在主流程 `rag_retrieve.mjs`，`rag_rerank.mjs` 只消费 `row.scored.businessPenaltyMultiplier`，不再 import `CITY_PLACE_SPECIFIC_PENALTY_BY_THEME` / `DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT`、不再持有权重常量。含义：rerank 侧的 `penalty_multiplier` 只有两种取值来源——主流程给的系数，或缺失时的 1。人工 fixture 不再能靠 `scored.breakdown.signals/weights` 间接驱动 penalty，相关断言须走主流程端到端路径。
+- **`rerankQuery` 生成方**：「接入位置」里 `retrieve()` 不再自己构造 `rerankQuery`，只传 `{ query, entity, theme, topK }`；模板渲染收在 `rag_rerank.mjs` 内，并回填到 `diagnostics.rerank.rerank_query`。
+- **传输层校验**：rerank 响应除本文列出的失败条件外，还要求 `results.length` 与请求 `documents.length` 严格相等。
+- **默认 URL**：本文配置块写 `http://localhost:11435/rerank`，实际统一为 `http://127.0.0.1:11435/rerank`。
+
+### theme 启用范围
+
+默认口径与本文一致：只有 `highRiskThemes` 会调用模型，非白名单 theme 记 `theme_not_in_scope` 且不碰 HTTP client。`--rerank-theme` 的双域语义与 `theme_scope.all_themes` 字段已补进「启用策略」和 `theme_scope` 示例，不再是偏离。仅剩一处实现细节：
+
+- `resolveRerankConfig()` 除 `rerankTheme` 外还兼容 `themes` / `extraThemes` 两个键名，二者都会并入 `extraThemes`。`themes` 这个名字过于通用，**透传 CLI 参数时必须逐字段映射，不能 `{ ...args }`** —— workspace 脚本的 `args.themes` 是检索用的 theme 列表，展开后会静默把该次生成涉及的全部 theme 拉进 rerank 白名单。

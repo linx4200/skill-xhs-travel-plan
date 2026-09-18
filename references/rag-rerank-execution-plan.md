@@ -186,6 +186,44 @@ scripts/rag/rag_rerank.mjs
 - 未启用 `--rerank` 时不访问 rerank API。
 - 非白名单 theme 返回原始 rows，并记录 `skipped_reason: "theme_not_in_scope"`。
 
+### 执行结论（阶段 4）
+
+产物：
+
+- 新增 `scripts/rag/rag_rerank.mjs`，导出 `resolveRerankConfig`、`rerankThemeScope`、`isThemeInScope`、`buildRerankQuery`、`buildRerankDocument`、`rerankRows`。
+- `rag_retrieval_config.mjs` 的 `RAG_RERANK_DEFAULTS` 补 `maxDocChars: 700`（技术方案配置块里有，阶段 3 的落地清单漏了，本阶段补齐）。
+
+验证：
+
+- mock 冒烟 10 组全过：未启用时零网络调用、非白名单 theme 不碰 client、重排 + 阈值过滤后结果可少于 `topK`、乱序结果按 id 对齐、缺失结果 / 重复 id / 非法概率 / NaN 抛错、`recallWidth < topK` 与越界阈值报错、窗口外不补位、城市 `backup_places` 地点级 penalty 0.7 保留且被城市级 chunk 压过、配置合并与模板兜底。
+- 真实服务联调（`127.0.0.1:11435`）：`highlights` 三个候选中住宿 `0.079`、餐饮 `0.109` 被阈值过滤，真看点 `0.9999` 保留 —— 正是本方案要解决的「泛化触发词跨主题误排」。热模型单次 `861ms`。
+- `npm test` 25/25 通过；`package.json` / `package-lock.json` 未新增任何 rerank 依赖。
+- 验证脚本落在 `/tmp`，未进仓库（单元测试属阶段 7）。
+
+实现偏离：
+
+| # | 偏离项 | 方案原文 | 实际实现 | 原因 |
+|---|---|---|---|---|
+| 4-1 | 导出面 | 只导出 `rerankRows()` | 另导出 `resolveRerankConfig` / `rerankThemeScope` / `isThemeInScope` / `buildRerankQuery` / `buildRerankDocument` | 阶段 6 要直接取 `theme_scope` 元信息；模板与范围判定需要单独可测 |
+| 4-2 | `config` 键名 | `url` / `recallWidth` / `probThreshold` / `timeoutMs` | 兼容 `rerankUrl` / `rerankModel` / `rerankRecallWidth` / `rerankThreshold` / `rerankTimeoutMs` / `rerankAllThemes` / `rerankTheme` 别名 | CLI 解析结果可原样透传；`resolveRerankConfig()` 保持幂等 |
+| 4-3 | 注入点 | 只有 `reranker?`（模型层 mock） | 增 `httpClient({url, body, timeoutMs})` 传输层注入，注入时跳过 URL 校验 | 让 HTTP 契约与排序逻辑可分别测试 |
+| 4-4 | `reranker` 入参 | `(pairs) => [{ probability }]` | `({ model, query, documents }) => ...`，返回项支持纯数字 / `{probability}` / `{id, probability}` | 与真实 `/rerank` 请求体同构；缺省 id 按 documents 顺序对齐 |
+| 4-5 | 诊断字段 | `enabled`、`applied`、`skipped_reason`、`url`、`model_id`、`recall_width`、`probability_threshold`、`input_count`、`kept_count`、`duration_ms`、`items` | 另增 `rerank_query`、`filtered_count`、`out_of_window_count` | 窗口外丢弃是真实副作用，不记录则不可观测；`rerank_query` 便于回溯模板渲染结果 |
+| 4-6 | `skipped_reason` 取值 | `theme_not_in_scope`、`empty_candidates` | 另增 `disabled`、`missing_entity` | 未启用与无实体检索套用 theme 原因会误导排查 |
+| 4-7 | doc 构造 | 拼成 `标题：…\n正文：…` 单字符串 | `{ id, title, text }` 分字段传；`maxDocChars` 只截 `text`；`text` 为空退回 `title`；`id` 取 `chunk.chunk_id` | 拼装模型 prompt 属服务职责；服务要求 `text` 非空，否则整批 400 |
+| 4-8 | penalty 折算归属 | 公式 `businessPenalty = 1 + signal * weight …` 落在 rerank 侧 | **已修正**：折算函数与 clamp 收回主流程 `rag_retrieve.mjs`（新增 `businessPenaltyMultiplier(signals, weights)` + `MIN_BUSINESS_PENALTY_MULTIPLIER`）；`scoreChunk()` 与 `score` / `matches` / `breakdown` 平级输出 `businessPenaltyMultiplier`；rerank 侧退化为 `penaltyMultiplierOf(row)`——读 `row.scored.businessPenaltyMultiplier`，非有限数按 1 回退 | rerank 是旁支不是主流程，业务规则的定义权必须在主流程。原先旁支用硬编码列名再算一遍，主流程新增 penalty 时旁支会静默漏改 |
+| 4-9 | 默认 URL | `http://localhost:11435/rerank` | `http://127.0.0.1:11435/rerank` | 与阶段 3 落地值统一，避免 localhost 解析歧义 |
+| 4-10 | 兜底句 | 只定义 theme 兜底句 | theme 为空时另有 `请判断下面材料是否与「{name}」的旅行信息相关。` | `--query` 无 theme 检索同样需要稳定 query |
+| 4-11 | 结果校验 | 缺失结果、重复 id、非法概率视为失败 | 另加 `results.length === documents.length` 严格等长 | 数量不符说明服务与请求已错位，靠 id 对齐兜不住 |
+| 4-12 | `--rerank-theme` 生效语义 | 只在 CLI 列表里出现参数名，未定义语义；正文口径是「`highRiskThemes` 是第一阶段白名单」 | `extraThemes` **同时**并入 `place` 与 `city` 两套白名单，实际是否生效由请求时的 `entity.type` 决定；另兼容 `themes` / `extraThemes` 两个键 | 调参时常见需求是「把某个 theme 在景点和城市上都打开」，按域限定要多传一次；但这条扩展绕过了「按 entity.type 限定」的原始语义 |
+| 4-13 | `theme_scope` 输出结构 | `theme_scope` 只有 `place` / `city` 两个列表 | `rerankThemeScope()` 另返回 `all_themes: boolean`（`--rerank-all-themes` 时为 `true`，白名单列表仍照常返回） | 全 theme 调参时白名单列表已不代表实际范围，不标出会误导 |
+
+`4-12` / `4-13` 已确认采纳：双域语义写进技术方案「启用策略」，`all_themes` 字段写进 `theme_scope` 示例。两条保留在表中仅供追溯，不再是待决偏离。
+
+`4-8` 已修正（阶段 6 开工前，只动 `rag_retrieve.mjs` 与 `rag_rerank.mjs`）：折算与 clamp 全部收回主流程，rerank 侧不再持有任何 penalty 权重常量、不再 import `CITY_PLACE_SPECIFIC_PENALTY_BY_THEME` / `DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT`。技术方案「推荐后处理公式」段同步标注了实现位置，本条随之从「偏离」变为「按设计落地」。
+
+修正的副作用（验证时已确认）：人工 fixture 若不给 `scored.businessPenaltyMultiplier`，rerank 侧的 `penalty_multiplier` 由原来的「按 fixture 里的 signals/weights 折算」变为固定 1（视作无 penalty）。因此「视频降权 / 城市地点级软惩罚在 rerank 后仍生效」这条断言，已从 `rag_rerank` 侧的 fixture 测试迁到主流程侧的端到端测试（`retrieve()` 注入 `rerank.reranker`，读 `diagnostics.rerank.items[].penalty_multiplier`）。阶段 7 写 `test/rag_rerank.test.mjs` 时按此拆：rerank 侧只验「读到了就乘、读不到按 1」，折算规则归 `rag_retrieve.test.mjs`。
+
 ## 阶段 5：接入 `rag_retrieve.mjs`
 
 修改 `scripts/rag/rag_retrieve.mjs`：
@@ -208,6 +246,35 @@ scripts/rag/rag_rerank.mjs
 - rerank 细节只写入 diagnostics。
 - `includeDiagnostics` 为 false 时不输出 rerank 明细。
 
+### 执行结论（阶段 5）
+
+产物：只改 `scripts/rag/rag_retrieve.mjs`。
+
+验证：
+
+- 新增 8 个 CLI 参数后，接入点固定在 `rankedRows` 排序完成之后、`slice(0, topK)` 之前。
+- 真实索引对照（53 chunks，大山包 / `highlights` / top-k 5）：顺序变化，但 `result.score` 保持原综合分（输出分数非单调）；`020` 从候选 rank3 升到最终第 1，`005` 从窗口内 rank7 挤进 top5。
+- 诊断：`input_count 9` / `kept 7` / `filtered 2` / `out_of_window 0`（9 条是通过 gate 的实际候选量，未达 `recallWidth 12`）；`recall_status` 分布 `selected 5 + reranked_filtered 2 + scored_not_selected 2 + filtered_by_entity_gate 44 = 53`。
+- 跳过与失败路径：非白名单 theme → `theme_not_in_scope` 且不调服务；服务不可达 / 1ms 超时 / 非法 URL / 409 模型不匹配 → 全部 `exit=1` 并带 `Rerank failed for place 大山包 / highlights:` 上下文；`--top-k 20 --rerank` → 提示 recall-width 不足；`--rerank-recall-width abc` → 立即报错。
+- `RAG_RERANK_URL` 生效，CLI 覆盖环境变量生效；`highlights` / `nearby` / `facilities` 三个 theme 依次 rerank 均 `applied`。
+- 未启用 rerank 的 `--json` 输出零 rerank 字段；`npm test` 25/25 通过，默认路径行为零变化。
+
+实现偏离：
+
+| # | 偏离项 | 方案原文 | 实际实现 | 原因 |
+|---|---|---|---|---|
+| 5-1 | `maybeRerankRows()` 职责 | 独立函数，内含接入与短路 | 只做一行转发到 `rerankRows()` | 短路留在模块内，未启用时也能产出 `enabled:false` 诊断块；未启用路径本就不解析配置、零网络 |
+| 5-2 | `rerankQuery` 生成方 | snippet 中 `retrieve()` 构造 `rerankQuery` 后传入 | `retrieve()` 只传 `{ query, entity, theme, topK }`，模板由 `rag_rerank.mjs` 生成并回填 `diagnostics.rerank.rerank_query` | 模板表单一来源，两处生成必然漂移 |
+| 5-3 | CLI 默认值 | 未规定 | `rerankUrl` / `rerankModel` 默认 `""`，`rerankRecallWidth` / `rerankThreshold` / `rerankTimeoutMs` 默认 `undefined` | 空值表示「未显式指定」，避免 CLI 默认值遮住环境变量 |
+| 5-4 | 数值范围校验位置 | 启动参数校验报错 | `parseArgs` 只校验「能否解析成有限数字」，范围规则统一留在 `validateRerankOptions()` | 规则单点维护，不重复实现 |
+| 5-5 | `reranked_filtered` 判定来源 | 由 rerank 结果直接判定 | 从 `diagnostics.rerank.items` 中 `passed_threshold === false` 反推 | 不改动 `rerankRows()` 的返回值形状 |
+| 5-6 | 诊断块写入时机 | rerank 细节只写入 diagnostics | `diagnostics.rerank` 恒写入（未启用时为 `skipped_reason: "disabled"`），但整体 diagnostics 仅在 `--log` 时输出 | 让日志能回答「这次为什么没走 rerank」 |
+
+联调发现（待阶段 8 决策）：
+
+- `facilities` 在阈值 `0.9` 下 9 个候选全部低于阈值，该 theme 返回 0 条。符合「不为凑名额引入弱内容」，但设施信息整体空掉是否可接受需要调参判断。
+- 单 theme 约 `11.7–14.4s`（9 docs，CPU，≈`1.4s/doc`）；热模型单次 `861ms`。批量场景每个 target 4 个启用 theme → 50s+，10 景点 + 6 城市约 15 分钟量级。
+
 ## 阶段 6：接入 `create_retrieval_workspace.mjs`
 
 修改 `scripts/rag/create_retrieval_workspace.mjs`：
@@ -216,6 +283,11 @@ scripts/rag/rag_rerank.mjs
 - `retrieval.scoring` 增加 `rerank` 元信息。
 - `themes.<theme>[]` 保持只包含 `chunk_id`、`score`、`matched_by`。
 - 不把 rerank probability 写入普通 `retrieval-workspace.json` 阅读索引。
+
+透传注意（承接阶段 4 的 4-12 / 4-13）：
+
+- **不要用 `{ ...args }` 批量透传。** `resolveRerankConfig()` 会把 `themes` 键并入 `extraThemes`，而 workspace 脚本的 `args.themes` 是**检索用的 theme 列表**，直接展开会把该次生成涉及的全部 theme 意外拉进 rerank 白名单，静默放宽启用范围。必须逐字段映射（照 `rag_retrieve.mjs` 的 `rerankOptionsFromArgs()` 写法）。
+- `retrieval.scoring.rerank.theme_scope` **按含 `all_themes` 的结构写入**（已定，见 4-13）。直接照抄 `rerankThemeScope()` 的返回值，不要只取 `place` / `city` 两个列表 —— `--rerank-all-themes` 时那两份列表不代表实际范围。
 
 ## 阶段 7：补测试
 
@@ -246,7 +318,7 @@ scripts/rag/rag_rerank.mjs
 - 验证 `themes.<theme>[]` 不包含 rerank probability。
 - 验证 theme 被阈值过滤为空时产生 `empty_theme:<theme>` warning。
 
-## 阶段 8：联调命令
+## 阶段 8：联调与调参
 
 先启动全局服务：
 
@@ -302,6 +374,67 @@ node scripts/rag/create_retrieval_workspace.mjs \
   --rerank-url http://127.0.0.1:11435/rerank
 ```
 
+### 调参工作项（阶段 8）
+
+`probThreshold` 默认 `0.9` 是预研期的经验值，只在 `highlights` 上验证过；`facilities` 在 0.9 下 9 个候选全部被切。**所以调参第一步不是试阈值，而是先扫概率分布** —— 不看清分布，分不出「阈值偏高」「query 模板不匹配」「笔记本来没这条信息」三种情况，试也是瞎试。
+
+**第 1 步：扫分布。** 对 4 个启用 theme 各跑一次带 `--log` 的单点检索（`diagnostics.rerank.items` 始终记录窗口内**全部**候选的概率，含未过阈值的，不用把阈值调 0）：
+
+```bash
+node scripts/rag/rag_retrieve.mjs \
+  --rag-index output/2026-guoqing-self-drive-plan/rag-index.json \
+  --place <place> \
+  --theme highlights --theme nearby --theme facilities \
+  --top-k 5 --embedding-model qwen3-embedding:0.6b \
+  --rerank --rerank-url http://127.0.0.1:11435/rerank \
+  --rerank-recall-width 12 --rerank-threshold 0.9 \
+  --log /tmp/threshold-scan.json --json > /dev/null
+```
+
+按 theme 打出降序概率串，看有没有断层：
+
+```bash
+node -e "
+const log = require('/tmp/threshold-scan.json');
+for (const r of log.requests) {
+  const k = r.rerank ?? {};
+  if (!k.applied) { console.log('---', r.theme || '(none)', '| skipped:', k.skipped_reason); continue; }
+  const probs = (k.items ?? []).map((i) => i.rerank_probability).sort((a, b) => b - a);
+  console.log('---', r.theme, '| n=' + probs.length, '| top', probs[0], '| tail', probs[probs.length - 1]);
+  console.log('   ', probs.join('  '));
+  console.log('    query:', k.rerank_query);
+}
+"
+```
+
+**第 2 步：按分布形态判读。** 这一步决定改什么，不要跳过：
+
+| 分布形态 | 判读 | 动作 |
+|---|---|---|
+| 高位簇 + 低位簇，中间有明显断层 | 阈值机制有效，断层就是天然切点 | 把 `probThreshold` 放进断层里，别贴着簇边缘 |
+| 整体高于阈值且无断层 | 该 theme 主题一致性本来就高 | 保持 0.9。**不要因为分数高就想用它精排** —— 饱和区内部差异仅 `0.0003`，不可靠 |
+| 整体低于阈值（`facilities` 现状） | 三种可能，必须人工核对才能定 | 看窗口内概率最高的 3 条正文：① 确实是该 theme 内容 → 阈值偏高或 query 模板语域不匹配，改模板重跑对比；② 不是该 theme 内容 → 过滤正确，接受该 theme 为空；③ 相关内容压根没进窗口 → 是 gate / 召回问题，**阈值治不了** |
+| 断层正好压在窗口边界 | `recallWidth` 太窄，切点被截断 | 提高 `recallWidth` 到 16 / 20 重扫 |
+
+**第 3 步：按固定顺序调，一次只动一个变量。**
+
+1. **先定阈值**：固定 `recallWidth 12`，只调 `--rerank-threshold`。
+2. **再看窗口**：固定阈值，只调 `--rerank-recall-width`。判据：只有 `out_of_window_count > 0` **且**窗口末位概率仍高于阈值时才需要扩大。当前实测 `input_count 9` / `out_of_window_count 0`（候选不到 12），说明 12 在现有索引上根本不是瓶颈，调大只增加成本。
+3. **最后看模板**：固定前两者，只改 `RAG_RERANK_DEFAULTS.queryTemplates` 的措辞。仅在判读结论落在「① 内容相关但整体低分」时才动。
+
+**第 4 步：批量侧复核。** 用上面的批量命令跑全量，检查：
+
+- `retrieval_health.warnings` 里 `empty_theme:<theme>` 的数量与分布（`facilities` 是否成为常态空 theme）。
+- 总耗时，以及各 theme 的 `filtered_count` 汇总。
+- 白名单本身是否选对：顺手用 `--rerank-all-themes` 跑一次 `drawbacks` / `tickets` 等非白名单 theme，看它们是否真的不需要 rerank。预研只按词表推断过泛化度，没实测核对过。
+
+**阶段 8 待决事项**（前两条从阶段 4 / 5 带下来）：
+
+1. `facilities` 在 0.9 下整段清空，是否接受？还是降阈值 / 改模板让它留下 1–2 条？
+2. 单 theme 约 `11.7–14.4s`（9 docs，≈`1.4s/doc`）；批量 10 景点 + 6 城市 × 4 theme ≈ 15 分钟量级。是否接受？不接受只能降 `recallWidth` 或收紧白名单。
+3. **是否需要 per-theme 阈值**：当前 `probThreshold` 是全局单一标量。若第 2 步结论是「各 theme 天然断层位置不同」，就必须改成可按 `entity.type + theme` 覆盖 —— 这是配置结构改动，属于新增工作项，不在阶段 8 顺手做，需要单独评估。
+4. `facilities` 的 query 模板含「厕所、补给、餐饮、休息区、游客中心」，与野外景区笔记的语域可能不匹配，是候选改动。
+
 ## 阶段 9：验收
 
 验收标准：
@@ -311,6 +444,7 @@ node scripts/rag/create_retrieval_workspace.mjs \
 - rerank 服务日志中的请求数量符合 target/theme 范围。
 - `highlights` 中住宿、餐饮、咖啡等非看点内容被过滤或降出 top results。
 - 阈值过滤后 theme 可以少于 5 条。
+- 阈值定稿能追溯到阶段 8 的概率分布扫描结论；`empty_theme` 只在人工核对确认「该 theme 确实无对应内容」时出现，不是阈值副产物。
 - `result.score` 保留原始检索分。
 - `retrieval-workspace.json` 不包含 rerank probability。
 - `retrieval-log.json` 在 `--log` 时包含 rerank diagnostics。
