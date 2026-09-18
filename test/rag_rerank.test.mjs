@@ -55,6 +55,10 @@ test("fixed template table builds natural-language rerank queries", () => {
     "昭通有哪些可作为行程备选、顺路补充或城市周边的小众地点？",
   );
   assert.equal(
+    buildRerankQuery({ type: "place", name: "大山包" }, "facilities"),
+    "大山包游玩有什么厕所、停车、吃饭、住宿、骑马等实用配套信息？",
+  );
+  assert.equal(
     buildRerankQuery({ type: "place", name: "大山包" }, "unknown_theme"),
     "请判断下面材料是否有助于回答「大山包 的 unknown_theme 相关旅行信息」。",
   );
