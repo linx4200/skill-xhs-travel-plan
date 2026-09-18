@@ -144,8 +144,8 @@ function timelineItems(items, fallbackTitle = "") {
       summary = item.summary || item.text || "";
       details = textList(item.details ?? []);
     } else {
-      label = fallbackTitle || textOf(item);
-      summary = textOf(item);
+      label = textOf(item);
+      summary = "";
     }
     if (!label && !summary) continue;
     rows.push({ label, summary, details });
@@ -278,7 +278,7 @@ function prepareDay(day, facts, resourceRoot, outDir, totalDays) {
 /**
  * 准备单个城市详情页的模板数据。
  */
-function prepareCity(name, data) {
+function prepareCity(name, data, resourceRoot, outDir) {
   const groups = [];
   const elevation = elevationItem(data);
   if (elevation) groups.push({ title: "海拔高度", items: [elevation] });
@@ -297,6 +297,7 @@ function prepareCity(name, data) {
     title: name,
     overview: textList(data.overview?.length ? data.overview : data.summary),
     groups,
+    photos: preparePhotos(name, data.photos ?? [], resourceRoot, outDir),
   };
 }
 
@@ -324,7 +325,7 @@ function render(facts, outDir, skillRoot) {
   });
   includedCities(facts).forEach(([city, data], index) => {
     const filename = `city-${String(index + 1).padStart(2, "0")}.html`;
-    fs.writeFileSync(path.join(outDir, filename), renderTemplate(skillRoot, "city.ejs", prepareCity(city, data)), "utf8");
+    fs.writeFileSync(path.join(outDir, filename), renderTemplate(skillRoot, "city.ejs", prepareCity(city, data, resourceRoot, outDir)), "utf8");
   });
 }
 
