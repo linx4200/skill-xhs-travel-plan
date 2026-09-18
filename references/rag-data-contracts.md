@@ -74,7 +74,7 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 - `retrieval_health.hard_gap_reasons`：明确无法依赖 RAG 的原因，例如完全没有召回。
 - `retrieval_quota.max_chunks`、`selected_chunks`：该 target 的阅读池上限与实际入池数量。
 - `retrieval_quota.dropped_total`、`dropped_by_theme`：被阅读池名额丢弃的 chunk 数量，按主题归集。这些 chunk 确实被对应主题命中，但既不在 `unique_chunk_ids` 里，也不在 `themes.<theme>[]` 索引里。默认参数下为 0 和 `{}`。当该值大于 0 时，agent 不得直接判断对应字段没有素材；字段缺口或高风险事项需要用单点检索定向复核。
-- `themes.<theme>[]`：字段优先阅读索引；每项固定包含 `chunk_id`、`score` 和 `matched_by`。当条目需要解释业务排序时，可额外包含 `place_specific: true` 或 `tier: 1`。agent 填写与该 theme 对应的字段时，优先按这里的 `chunk_id` 到 `chunks_by_id` 读取原文。
+- `themes.<theme>[]`：字段优先阅读索引；每项固定包含 `chunk_id`、`score` 和 `matched_by`。当条目需要解释业务排序时，可额外包含 `place_specific: true` 或 `tier: 1`。该索引不包含 `rerank_probability`、`final_rerank_score`、`tilt_multiplier` 或 `penalty_multiplier`。agent 填写与该 theme 对应的字段时，优先按这里的 `chunk_id` 到 `chunks_by_id` 读取原文。
 
 阅读池名额按主题顺序先到先得：各主题按 `themes` 的 key 顺序依次入池，池满后新 chunk 一律丢弃（记录到 `retrieval_quota`），已入池的 chunk 仍会登记进后序主题的索引。默认参数下 place 为 10 个主题 × 每个主题 5 条 = 50、city 为 5 × 5 = 25，恰好等于 `max_place_chunks` / `max_city_chunks`，因此默认不产生丢弃；调大 `--place-top-k` / `--city-top-k` 或新增主题后才会触发，且总是从主题顺序末尾开始。
 
@@ -89,6 +89,24 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 - 带 `place` 的检索只召回 `candidate_places` 命中目标地点的 chunk。
 - 带 `city` 的检索只召回 `candidate_cities` 命中目标城市的 chunk。`backup_places` 中同时绑定 `candidate_places` 的地点级 chunk 进入低优先档；其他 city theme 中的地点级 chunk 只做软降权。
 - 若 chunks 含 embedding，则 query embedding 相似度参与主题候选池内排序；标题/正文关键词、实体、标题来源分组成纯相关性分。视频来源和城市地点级业务规则不进入 `score.breakdown`，而由 `business` / `retrieval.scoring.business_rules` 表达。
+- 启用 rerank 时，rerank 只在 `retrieval.scoring.rerank.theme_scope` 命中的 target/theme 上执行。rerank 概率只用于主题相关性过滤和内部排序，不写入常规阅读索引。
+
+`retrieval.scoring` 字段：
+
+- `strategy`：检索排序策略名。启用 rerank 时以 `_rerank` 结尾。
+- `weights`：相关性分权重。只描述 query embedding、关键词、实体和标题来源等相关性信号。
+- `business_rules.city_tier_themes`：城市检索中使用硬档位的 theme；当前为 `backup_places`。
+- `business_rules.video_tilt`：视频来源软降权幅度。
+- `business_rules.city_tilt.default`、`business_rules.city_tilt.by_theme`：非硬档位 city theme 中地点级 chunk 的软降权规则。
+- `rerank.enabled`：本次批量生成是否启用 rerank。
+- `rerank.url`：项目侧调用的本地 rerank HTTP endpoint。
+- `rerank.model_id`：传给 rerank 服务的模型标识。
+- `rerank.recall_width`：每个命中 theme 进入 rerank 的候选窗口宽度。
+- `rerank.probability_threshold`：rerank 概率阈值；低于阈值的候选不进入该 theme 的常规结果。
+- `rerank.theme_scope.place`、`rerank.theme_scope.city`：默认和额外启用的 rerank theme 白名单。
+- `rerank.theme_scope.all_themes`：是否对所有 theme 启用 rerank。为 `true` 时 `place` / `city` 列表仍输出，但不代表实际启用范围。
+- `rerank.threshold_filtering`：是否按概率阈值过滤。
+- `rerank.business_rules_preserved`：是否保留业务排序规则；为 `true` 时 rerank 后仍先按 `tier` 分层，再按软降权后的 rerank 分排序。
 
 Agent 填 facts 时按字段优先读取 `themes.<theme>[]` 的 chunk_id，再到顶层 `chunks_by_id` 读取原文；`unique_chunk_ids` 只在 theme 为空、信息不足、冲突、综合判断或高风险复核时作为兜底。若已读 chunk 中出现本次行程城市或地点的海拔数值，必须写入对应 facts 目标的 `elevation_m`。不要把 `text`、`score`、`matched_by` 或大段 evidence 写入最终 `facts-workspace.json`。
 
@@ -129,6 +147,16 @@ Agent 填 facts 时按字段优先读取 `themes.<theme>[]` 的 chunk_id，再�
 - `candidate_places`、`candidate_cities`
 
 日志不复制完整 embedding 数组。
+
+`requests[].rerank` 字段：
+
+- `enabled`、`applied`、`skipped_reason`
+- `url`、`model_id`
+- `rerank_query`
+- `recall_width`、`probability_threshold`
+- `input_count`、`kept_count`、`filtered_count`、`out_of_window_count`
+- `duration_ms`
+- `items[]`：窗口内候选诊断，包含 `chunk_id`、`original_rank`、`original_score`、`tier`、`rerank_probability`、`passed_threshold`、`penalty_multiplier` 和 `final_rerank_score`。这些字段只用于日志调试，不进入常规 `retrieval-workspace.json` 阅读索引。
 
 ## facts-workspace.json 的 RAG 差异
 

@@ -112,7 +112,7 @@ export const RAG_RERANK_DEFAULTS = {
     place: {
       highlights: "{name}有哪些值得专门停留、拍照或体验的景观亮点和游玩看点？",
       nearby: "{name}周边有哪些顺路、附近或可组合游玩的地点和路线建议？",
-      facilities: "{name}现场有哪些厕所、补给、餐饮、休息区、游客中心、充电桩等设施信息？",
+      facilities: "{name}游玩有什么厕所、停车、吃饭、住宿、骑马等实用配套信息？",
     },
     city: {
       backup_places: "{name}有哪些可作为行程备选、顺路补充或城市周边的小众地点？",

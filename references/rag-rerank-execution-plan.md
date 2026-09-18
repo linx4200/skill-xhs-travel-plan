@@ -169,7 +169,7 @@ curl http://127.0.0.1:11435/health
 |---|---|---|
 | 景点 | `highlights` | `{name}有哪些值得专门停留、拍照或体验的景观亮点和游玩看点？` |
 | 景点 | `nearby` | `{name}周边有哪些顺路、附近或可组合游玩的地点和路线建议？` |
-| 景点 | `facilities` | `{name}现场有哪些厕所、补给、餐饮、休息区、游客中心等设施信息？` |
+| 景点 | `facilities` | `{name}游玩有什么门票、观光车、停车、吃饭、住宿、骑马等实用配套信息？` |
 | 城市 | `backup_places` | `{name}有哪些可作为行程备选、顺路补充或城市周边的小众地点？` |
 
 ## 阶段 4：项目内新增 `rag_rerank.mjs`
@@ -454,12 +454,49 @@ for (const r of log.requests) {
 - 总耗时，以及各 theme 的 `filtered_count` 汇总。
 - 白名单本身是否选对：顺手用 `--rerank-all-themes` 跑一次 `drawbacks` / `tickets` 等非白名单 theme，看它们是否真的不需要 rerank。预研只按词表推断过泛化度，没实测核对过。
 
-**阶段 8 待决事项**（前两条从阶段 4 / 5 带下来）：
+### 执行结论（阶段 8）
 
-1. `facilities` 在 0.9 下整段清空，是否接受？还是降阈值 / 改模板让它留下 1–2 条？
-2. 单 theme 约 `11.7–14.4s`（9 docs，≈`1.4s/doc`）；批量 10 景点 + 6 城市 × 4 theme ≈ 15 分钟量级。是否接受？不接受只能降 `recallWidth` 或收紧白名单。
-3. **是否需要 per-theme 阈值**：当前 `probThreshold` 是全局单一标量。若第 2 步结论是「各 theme 天然断层位置不同」，就必须改成可按 `entity.type + theme` 覆盖 —— 这是配置结构改动，属于新增工作项，不在阶段 8 顺手做，需要单独评估。
-4. `facilities` 的 query 模板含「厕所、补给、餐饮、休息区、游客中心」，与野外景区笔记的语域可能不匹配，是候选改动。
+单点扫描：
+
+- `大山包 / highlights`：`input=9`、`kept=7`、`filtered=2`、`out=0`；概率为 `0.9991 0.999 0.9989 0.9963 0.9934 0.9751 0.9728 0.8245 0.553`。
+- `大山包 / nearby`：`input=9`、`kept=6`、`filtered=3`、`out=0`；概率为 `0.9979 0.9959 0.9939 0.9924 0.9768 0.9736 0.8429 0.7332 0.1651`。
+- `昭通 / backup_places`：`input=12`、`kept=7`、`filtered=5`、`out=2`；唯一 `tier=0` 城市级候选最终排第 1，地点级候选即使概率更高也不可翻越。
+
+`facilities` 调参：
+
+- 原模板在 `大山包 / facilities` 下最高概率只有 `0.8133`，默认阈值 `0.9` 会清空该 theme。
+- 人工核对最高概率候选后，候选实际包含停车、门票、观光车、饮食、住宿、骑马等现场配套信息；问题是原 query 语域偏窄。
+- 固定模板改为 `{name}游玩有什么门票、观光车、停车、吃饭、住宿、骑马等实用配套信息？`。
+- 复跑后 `input=9`、`kept=5`、`filtered=4`、`out=0`；保留概率为 `0.9998 0.9993 0.9983 0.9598 0.9438`。默认阈值保持 `0.9`，不引入 per-theme 阈值。
+
+批量复核：
+
+- 全量命令输出到 `/tmp/rag-rerank-phase8-retrieval-workspace.json` 和 `/tmp/rag-rerank-phase8-retrieval-log.json`。
+- 覆盖 `7` 个景点、`6` 个城市、`100` 个检索请求；rerank 实际执行 `27` 个请求，跳过 `73` 个非白名单请求。
+- 总耗时 `5:20.86`。
+- theme 汇总：
+
+| theme | 请求数 | input | kept | filtered | out_of_window | empty |
+|---|---:|---:|---:|---:|---:|---:|
+| `highlights` | 7 | 52 | 43 | 9 | 0 | 0 |
+| `nearby` | 7 | 52 | 41 | 11 | 0 | 0 |
+| `facilities` | 7 | 52 | 33 | 19 | 0 | 0 |
+| `backup_places` | 6 | 47 | 30 | 17 | 9 | 1 |
+
+- 全量 `retrieval_health.warnings`：`city_retrieval_is_broad` × 5、`retrieved_note_chunks_below_2:1` × 1、`empty_theme:backup_places` × 1。
+- 唯一空 theme 是 `乐山 / backup_places`，窗口内只有 1 条候选且最高概率 `0.1587`，接受为空。
+
+非白名单抽查：
+
+- `大山包 / drawbacks` 用 `--rerank-all-themes` 抽查：`input=9`、`kept=7`、`filtered=2`、`out=0`。
+- 兜底 query 可以过滤低分长尾，但高分簇较宽；当前不扩大默认白名单，后续如要覆盖 `drawbacks` / `tickets` 需要单独按固定模板补语义句后再批量扫描。
+
+阶段 8 决策：
+
+- `probThreshold` 继续使用全局 `0.9`。
+- `recallWidth` 继续使用 `12`；景点三类 theme 全量 `out_of_window=0`，当前瓶颈不在窗口宽度。
+- `facilities` 通过模板修正解决清空问题，不降低阈值。
+- 当前不引入 per-theme 阈值。
 
 ## 阶段 9：验收
 
@@ -478,6 +515,19 @@ for (const r of log.requests) {
 - 视频来源软降权和城市 `backup_places` 档位在 rerank 后仍然影响最终排序。
 - 项目仓库不出现 `@huggingface/transformers`、`onnxruntime` 或模型文件。
 
+### 执行结论（阶段 9）
+
+验收通过：
+
+- `npm test` 通过，`39/39`。
+- 默认路径不启用 `--rerank` 时，即使传入不可达的 `--rerank-url http://127.0.0.1:9/rerank`，单点检索仍成功输出；普通 JSON 输出不包含 `diagnostics`、`rerank`、`probability` 或 `final_rerank_score`。
+- 阶段 8 全量日志显示 `100` 个检索请求中 rerank 实际执行 `27` 个，跳过 `73` 个；执行范围只包含 `backup_places`、`facilities`、`highlights`、`nearby`，其余请求均为 `theme_not_in_scope`。
+- `retrieval-workspace.json` 验收样本不包含 `rerank_probability`、`final_rerank_score`、`tilt_multiplier` 或 `penalty_multiplier`；`retrieval.scoring.rerank` 与 `retrieval.scoring.business_rules` 存在。
+- `大山包 / facilities` 在模板修正后保留 `5` 条，概率为 `0.9998 0.9993 0.9983 0.9598 0.9438`，不再被阈值误清空。
+- 全量唯一空 theme 是 `乐山 / backup_places`，窗口内最高概率 `0.1587`，接受为空。
+- `昭通 / backup_places` 的最终结果中 `tier=0` 城市级候选排第 1，后续 `tier=1` 地点级候选不可翻越。
+- `package.json` / `package-lock.json` 不包含 `@huggingface/transformers` 或 `onnxruntime`；仓库内未发现 `.onnx`、Qwen3 模型文件、transformers cache 或 onnxruntime 文件。
+
 ## 阶段 10：文档同步
 
 更新文件：
@@ -487,3 +537,11 @@ for (const r of log.requests) {
 - `README.md`：补充可选 rerank 运行方式，明确默认 RAG 流程不启用 rerank。
 
 文档只描述目标流程和未来执行方式，不写迁移说明。
+
+### 执行结论（阶段 10）
+
+文档同步完成：
+
+- `references/rag-data-contracts.md` 补充 `retrieval.scoring.rerank`、`retrieval.scoring.business_rules`、`themes.<theme>[]` 的业务解释字段和 rerank 调试日志字段。
+- `references/rag-workflow.md` 补充可选 rerank 运行方式、本地服务健康检查、默认白名单、调参扩展参数和 loopback 访问要求。
+- `README.md` 补充可选 rerank 的全局服务前置条件、批量命令示例、默认关闭口径和项目内不安装模型依赖的边界。

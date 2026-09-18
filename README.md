@@ -20,6 +20,29 @@ RAG 流程的本地照片放在输入的 `rag-index.json` 同级 `photos/` 目�
 
 默认不生成 RAG 召回日志。只有用户明确要求 RAG 召回日志、检索日志或召回原因诊断时，才传 `--log <工作目录>/retrieval-log.json`。日志会按每个 target/theme 记录所有 chunk 的 entity gate、召回状态、向量余弦相似度、相关性分项贡献、业务状态和 rerank 诊断；不会复制完整 embedding 数组。
 
+可选 rerank 默认关闭。需要提高高风险 theme 的主题相关性时，先在项目外启动全局本地服务：
+
+```bash
+cd ~/Documents/rag-reranker
+node server.mjs
+curl http://127.0.0.1:11435/health
+```
+
+然后在批量检索中追加：
+
+```bash
+npm run rag:workspace -- \
+  --facts <工作目录>/facts-workspace.json \
+  --rag-index <rag-index.json> \
+  -o <工作目录>/retrieval-workspace.json \
+  --rerank \
+  --rerank-url http://127.0.0.1:11435/rerank \
+  --rerank-recall-width 12 \
+  --rerank-threshold 0.9
+```
+
+默认 rerank 范围只覆盖景点 `highlights`、`nearby`、`facilities` 和城市 `backup_places`。`retrieval-workspace.json` 不写入 rerank 概率、软降权乘子或最终内部排序分；需要调参诊断时同时传 `--log <工作目录>/retrieval-log.json`。项目内不安装 reranker 模型依赖，也不提交模型文件。
+
 随后 agent 读取 `retrieval-workspace.json`，按 target 和字段优先读取对应 theme chunks，逐轮整理一次性最小 `facts-patch.json`，再合并、检查、渲染。`facts-patch.json` 只包含当前 target 或当前批次相关路径，不是累计事实文件，也不是完整 `facts-workspace.json` 副本；每轮合并后立即清空或删除。数组字段在 patch 中按完整新数组写入。
 
 ```bash

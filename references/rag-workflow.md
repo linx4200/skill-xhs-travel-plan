@@ -95,6 +95,35 @@ Embedding 配置规则：
 
 默认不生成 `retrieval-log.json`。只有用户明确要求时，才追加 `--log <工作目录>/retrieval-log.json`。日志面向调试和调参，不作为 facts 填充的事实来源。
 
+可选 rerank：
+
+- 常规 RAG 流程默认不启用 rerank。需要提高高风险 theme 的主题相关性时，才显式传 `--rerank`。
+- rerank 服务运行在当前项目外的全局本地目录，例如 `~/Documents/rag-reranker`。项目内不安装 `@huggingface/transformers`、`onnxruntime` 或模型文件。
+- 启用前先启动本地服务并确认健康状态：
+
+```bash
+cd ~/Documents/rag-reranker
+node server.mjs
+curl http://127.0.0.1:11435/health
+```
+
+- 批量生成时按需追加 rerank 参数：
+
+```bash
+node scripts/rag/create_retrieval_workspace.mjs \
+  --facts <工作目录>/facts-workspace.json \
+  --rag-index <rag-index.json> \
+  -o <工作目录>/retrieval-workspace.json \
+  --rerank \
+  --rerank-url http://127.0.0.1:11435/rerank \
+  --rerank-recall-width 12 \
+  --rerank-threshold 0.9
+```
+
+- 默认 rerank 范围只覆盖景点 `highlights`、`nearby`、`facilities` 和城市 `backup_places`。调参时可用 `--rerank-theme <theme>` 扩展白名单，或用 `--rerank-all-themes` 覆盖全部 theme。
+- 启用 rerank 后，`retrieval-workspace.json` 仍是轻量阅读索引，不写入 rerank 概率、软降权乘子或最终内部排序分。需要查看概率、过滤原因和耗时时，追加 `--log <工作目录>/retrieval-log.json`。
+- 如果 rerank URL 是 `localhost`、`127.0.0.1` 或 `::1`，运行环境需要能访问用户宿主机 loopback 端口；在受限环境中直接请求相应权限，不用先让命令失败。
+
 ## Step 5：填充第一版 Facts Workspace
 
 Agent 读取 `retrieval-workspace.json` 后，按 target 逐轮整理一次性局部 `facts-patch.json`，再运行：
