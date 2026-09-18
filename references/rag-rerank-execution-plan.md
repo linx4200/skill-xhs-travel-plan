@@ -13,6 +13,14 @@
 - 默认只对高风险 theme 启用 rerank：景点 `highlights`、`nearby`、`facilities`，城市 `backup_places`。
 - 阈值过滤后允许 theme 返回少于 `topK` 条结果。
 
+完成判定：
+
+- `package.json` 和 `package-lock.json` 不包含 `@huggingface/transformers`、`onnxruntime` 或 Qwen3 reranker 相关依赖。
+- 仓库内不提交 `.onnx`、Qwen3 reranker、transformers 或 onnxruntime 模型/缓存文件。
+- rerank 相关实现仅作为项目内 HTTP client、配置和检索链路接入存在。
+- 全局 rerank 服务目录、模型下载和模型缓存由 `~/Documents/rag-reranker` 维护。
+- 后续阶段新增配置、CLI 和测试时，默认路径保持不访问 rerank 服务；只有显式启用 `--rerank` 或等价调用参数时才访问本地 HTTP rerank 服务。
+
 ## 阶段 1：准备全局 rerank 服务目录
 
 全局服务放在项目外，避免污染当前 skill 的依赖树。
@@ -20,8 +28,8 @@
 推荐目录：
 
 ```bash
-mkdir -p ~/.local/share/rag-reranker
-cd ~/.local/share/rag-reranker
+mkdir -p ~/Documents/rag-reranker
+cd ~/Documents/rag-reranker
 npm init -y
 npm install @huggingface/transformers
 ```
@@ -44,12 +52,19 @@ env.remoteHost = "https://hf-mirror.com";
 
 模型首次请求时由服务下载并缓存。缓存目录由全局服务维护，不写入项目仓库。
 
+当前本机状态：
+
+- 全局服务目录已创建：`~/Documents/rag-reranker`。
+- 目录内已有 `package.json`、`package-lock.json`、`node_modules/`、`server.mjs`。
+- `@huggingface/transformers` 已安装，版本范围为 `^4.3.0`。
+- 当前 skill 仓库的 `package.json` 和 `package-lock.json` 未新增 rerank 服务依赖。
+
 ## 阶段 2：实现全局 rerank HTTP 服务
 
 服务文件建议放在：
 
 ```text
-~/.local/share/rag-reranker/server.mjs
+~/Documents/rag-reranker/server.mjs
 ```
 
 服务接口：
@@ -100,7 +115,7 @@ env.remoteHost = "https://hf-mirror.com";
 本地启动：
 
 ```bash
-cd ~/.local/share/rag-reranker
+cd ~/Documents/rag-reranker
 node server.mjs
 ```
 
@@ -109,6 +124,20 @@ node server.mjs
 ```bash
 curl http://127.0.0.1:11435/health
 ```
+
+当前本机状态：
+
+- `~/Documents/rag-reranker/server.mjs` 已实现 `GET /health` 和 `POST /rerank`。
+- 服务使用 `env.remoteHost = "https://hf-mirror.com"`。
+- Qwen3 reranker q4 ONNX 模型已缓存到：
+
+```text
+~/Documents/rag-reranker/node_modules/@huggingface/transformers/.cache/onnx-community/Qwen3-Reranker-0.6B-ONNX/onnx/model_q4.onnx
+```
+
+- `model_q4.onnx` 当前大小为 `995235866` bytes。
+- 已完成一次 smoke rerank 验证，请求返回 `probability: 0.999796340326607`。
+- 服务日志显示本地缓存加载耗时约 `2639ms`，单文档 smoke 请求耗时约 `2915ms`。
 
 ## 阶段 3：项目内新增 rerank 配置
 
@@ -222,7 +251,7 @@ scripts/rag/rag_rerank.mjs
 先启动全局服务：
 
 ```bash
-cd ~/.local/share/rag-reranker
+cd ~/Documents/rag-reranker
 node server.mjs
 ```
 
