@@ -55,6 +55,10 @@ test("fixed template table builds natural-language rerank queries", () => {
     "昭通有哪些可作为行程备选、顺路补充或城市周边的小众地点？",
   );
   assert.equal(
+    buildRerankQuery({ type: "place", name: "大山包" }, "routes"),
+    "大山包游玩材料是否提供具体游览路线、先后顺序、环线、徒步、游船、观光车或索道等动线玩法安排？",
+  );
+  assert.equal(
     buildRerankQuery({ type: "place", name: "大山包" }, "facilities"),
     "大山包游玩材料是否提到任一实用配套信息，例如厕所/卫生间、停车/接驳/观光车、游客中心、吃饭住宿、补给/小卖部、休息区、寄存或充电？",
   );
