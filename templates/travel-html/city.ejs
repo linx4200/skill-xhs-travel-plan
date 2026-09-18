@@ -33,5 +33,28 @@
   </section>
 
 <% }) -%>
+<% if (photos.length) { -%>
+  <section>
+    <details open>
+      <summary><h2>照片</h2></summary>
+<% if (photos.length === 1) { -%>
+      <figure class="photo">
+        <img src="<%= photos[0].src %>" alt="<%= photos[0].alt %>" loading="lazy">
+        <figcaption><%= photos[0].caption %></figcaption>
+      </figure>
+<% } else { -%>
+      <div class="photo-grid">
+<% photos.forEach((photo) => { -%>
+        <figure class="photo">
+          <img src="<%= photo.src %>" alt="<%= photo.alt %>" loading="lazy">
+          <figcaption><%= photo.caption %></figcaption>
+        </figure>
+<% }) -%>
+      </div>
+<% } -%>
+    </details>
+  </section>
+
+<% } -%>
 </body>
 </html>

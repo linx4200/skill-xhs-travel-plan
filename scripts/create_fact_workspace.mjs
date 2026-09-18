@@ -244,6 +244,22 @@ function photosForPlace(index, place) {
 }
 
 /**
+ * 根据城市名匹配本地照片目录。城市照片用于城市页展示，不进入每日景点详情。
+ */
+function photosForCity(index, city) {
+  const photos = [];
+  const aliases = placeAliases(city);
+  for (const [photoPlace, items] of Object.entries(index.photos ?? {})) {
+    if (relatedPlaceName(city, photoPlace)) {
+      photos.push(...items);
+      continue;
+    }
+    photos.push(...items.filter((item) => aliases.some((alias) => item.includes(alias))));
+  }
+  return uniqueStrings(photos);
+}
+
+/**
  * 构建 facts-workspace.json 的初始结构；只创建空槽位，不自动生成攻略事实。
  */
 function buildFacts(index, routeStructure) {
@@ -286,6 +302,7 @@ function buildFacts(index, routeStructure) {
       transport: [],
       shopping: [],
       notes: [],
+      photos: photosForCity(index, city),
       source_files: filesForCity(index, city),
     };
   }
