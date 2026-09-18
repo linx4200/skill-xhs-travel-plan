@@ -13,12 +13,12 @@
  * 4. 在可用时调用 embedding API 生成 query 向量；否则退回到纯关键词、实体和标题来源打分。
  * 5. 对索引中的每个 chunk 逐条召回和排序：
  *    5.1 先执行实体 gate：景点检索要求 candidate_places 匹配，城市检索要求 candidate_cities 匹配。
- *    5.2 对通过 gate 的 chunk 计算关键词、实体、标题/来源、embedding、来源惩罚和城市地点级惩罚信号。
- *    5.3 根据是否有 query 向量、是否有实体目标和城市主题选择评分权重，并计算综合总分。
- *    5.4 过滤掉未通过 gate 或总分为 0 的 chunk，得到候选结果。
- *    5.5 城市检索把地点级 chunk 作为软 penalty 纳入总分；排序主要看总分，同分时偏向城市级 chunk。
+ *    5.2 对通过 gate 的 chunk 计算关键词、实体、标题/来源和 embedding 四类相关性信号。
+ *    5.3 根据是否有 query 向量、是否有实体目标选择评分权重，并计算纯相关性总分。
+ *    5.4 单独计算业务状态：硬档位 tier 与软降权 tilt_multiplier，不混入相关性分。
+ *    5.5 过滤掉未通过 gate 或相关性分为 0 的 chunk，并用 tier + 相关性分选择 rerank 窗口。
  *    5.6 可选 rerank：显式启用时，对高风险 theme 的候选窗口调用本地 rerank 服务重排并做相关性过滤。
- *        rerank 由 rag_rerank.mjs 实现，默认关闭；未启用时排序和截断行为与接入前一致。
+ *        未实际 rerank 时按 tier + 相关性分 × tilt_multiplier 做最终排序。
  *    5.7 按 topK 截断，生成最终返回的 results。rerank 允许某个 theme 少于 topK 条结果。
  * 6. 按参数输出 JSON 或终端短预览；如指定 `--log`，额外写出可解释的召回与评分诊断日志。
  */
@@ -29,25 +29,13 @@ import { fileURLToPath } from "node:url";
 import { placeAliases, relatedPlaceName } from "../place_name_utils.mjs";
 import { rerankRows } from "./rag_rerank.mjs";
 import {
-  CITY_PLACE_SPECIFIC_PENALTY_BY_THEME,
   CITY_THEMES,
-  DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT,
   PLACE_THEMES,
+  RAG_SCORING,
   RAG_RETRIEVAL_DEFAULTS,
 } from "./rag_retrieval_config.mjs";
 
 export { CITY_THEMES, PLACE_THEMES };
-
-/** 视频来源 chunk 的负权重，主流程评分和业务 penalty 折算共用同一个来源。 */
-const VIDEO_CHUNK_PENALTY_WEIGHT = -0.15;
-
-/**
- * 业务 penalty multiplier 的下限，避免多个负向 penalty 叠加后把最终分压成 0 或负数。
- *
- * 注意上限 1：`Math.min(1, …)` 只对「降权」语义成立。当前两条 penalty 都是负向，没有问题；
- * 将来若要加入正向修正信号（例如官方来源加权），这里的上限会把它切掉，届时要一并调整。
- */
-const MIN_BUSINESS_PENALTY_MULTIPLIER = 0.01;
 
 /**
  * 流程 1：解析单点检索命令参数。`--theme` 可重复传入；未传时只按实体或 query 检索。
@@ -474,35 +462,51 @@ function isVideoChunk(chunk) {
 }
 
 /**
- * 流程 5.3：城市检索时，命中城市但绑定具体景点的 chunk 使用软 penalty。
- *
- * 城市主题里的 `backup_places` 用来找没有具体地点归属的城市级备选信息，因此扣分最重；
- * 未知主题按默认城市 penalty 处理，避免地点级 chunk 在城市级查询中过度占据候选排序。
+ * 流程 5.4：判断城市检索结果是否是绑定具体景点的地点级 chunk。
  */
-function cityPlaceSpecificPenaltyWeight(entity, theme) {
-  if (entity?.type !== "city") return 0;
-  if (Object.hasOwn(CITY_PLACE_SPECIFIC_PENALTY_BY_THEME, theme)) {
-    return CITY_PLACE_SPECIFIC_PENALTY_BY_THEME[theme];
+function isPlaceSpecificCityChunk(chunk, entity) {
+  return entity?.type === "city" && candidateCityMatched(chunk, entity.name) && chunk.candidate_places.length > 0;
+}
+
+/**
+ * 流程 5.4：把可翻越的业务倾斜折算成乘性系数。
+ *
+ * 凡「不可翻越」的约束必须在召回层生效；凡「可翻越」的调整只在排序层生效。
+ */
+function tiltMultiplier({ is_video: isVideo, place_specific: placeSpecific }, theme) {
+  let multiplier = 1;
+  if (isVideo) multiplier *= 1 - RAG_SCORING.videoTilt;
+  if (placeSpecific && !RAG_SCORING.cityTierThemes.includes(theme)) {
+    const cityTilt = Object.hasOwn(RAG_SCORING.cityTiltByTheme, theme)
+      ? RAG_SCORING.cityTiltByTheme[theme]
+      : RAG_SCORING.defaultCityTilt;
+    multiplier *= 1 - cityTilt;
   }
-  return DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT;
+  return round4(Math.max(0, Math.min(1, multiplier)));
 }
 
 /**
- * 流程 5.2：判断城市检索结果是否是绑定具体景点的地点级 chunk。
- *
- * `candidate_cities` 仍然负责确认归属；这里只在已归属城市的 chunk 同时存在
- * `candidate_places` 时记 1，后续通过负权重降低排序分，而不是直接压到城市级 chunk 后面。
+ * 流程 5.4：计算业务状态。档位只表达硬分层，软降权只表达可翻越倾斜。
  */
-function cityPlaceSpecificPenaltySignal(chunk, entity) {
-  if (entity?.type !== "city") return 0;
-  return candidateCityMatched(chunk, entity.name) && chunk.candidate_places.length > 0 ? 1 : 0;
+function businessState(chunk, entity, theme) {
+  const isVideo = isVideoChunk(chunk);
+  const placeSpecific = isPlaceSpecificCityChunk(chunk, entity);
+  const tier = placeSpecific && RAG_SCORING.cityTierThemes.includes(theme) ? 1 : 0;
+  const facts = {
+    tier,
+    is_video: isVideo,
+    place_specific: placeSpecific,
+  };
+  return {
+    ...facts,
+    tilt_multiplier: tiltMultiplier(facts, theme),
+  };
 }
 
 /**
- * 流程 5.3：根据是否启用 query embedding、是否有实体目标和城市主题选择评分权重。
+ * 流程 5.3：根据是否启用 query embedding、是否有实体目标选择评分权重。
  */
-function scoreWeights(hasQueryVector, entity, theme) {
-  const cityPlaceSpecificPenalty = cityPlaceSpecificPenaltyWeight(entity, theme);
+function scoreWeights(hasQueryVector, entity) {
   if (hasQueryVector) {
     return entity?.name
       ? {
@@ -512,8 +516,6 @@ function scoreWeights(hasQueryVector, entity, theme) {
             keyword_match: 0.2,
             route_entity_match: 0.15,
             title_source_match: 0.05,
-            video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
-            city_place_specific_penalty: cityPlaceSpecificPenalty,
           },
         }
       : {
@@ -522,7 +524,6 @@ function scoreWeights(hasQueryVector, entity, theme) {
             query_embedding_similarity: 0.7,
             keyword_match: 0.25,
             title_source_match: 0.05,
-            video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
           },
         };
   }
@@ -533,8 +534,6 @@ function scoreWeights(hasQueryVector, entity, theme) {
           keyword_match: 0.55,
           route_entity_match: 0.35,
           title_source_match: 0.1,
-          video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
-          city_place_specific_penalty: cityPlaceSpecificPenalty,
         },
       }
     : {
@@ -542,7 +541,6 @@ function scoreWeights(hasQueryVector, entity, theme) {
         weights: {
           keyword_match: 0.8,
           title_source_match: 0.2,
-          video_source_penalty: VIDEO_CHUNK_PENALTY_WEIGHT,
         },
       };
 }
@@ -568,28 +566,10 @@ function scoreBreakdown(signals, scoring) {
 }
 
 /**
- * 流程 5.3：把业务 penalty 信号折算成乘性系数。
- *
- * businessPenalty = 1
- *   + video_source_penalty_signal * video_source_penalty_weight
- *   + city_place_specific_penalty_signal * city_place_specific_penalty_weight
- *
- * 主流程排序仍走加性 `score`（`scoreBreakdown()` 的 `total`），本函数只服务于
- * 「量纲不同、必须乘」的下游场景（当前唯一消费者是 rerank 的 `final_rerank_score`）。
- * 折算规则定义在主流程，避免业务规则新增时旁支漏改。
+ * 流程 5.6：输出面向 agent 阅读的检索结果。score 是纯相关性分；业务数值不进入常规输出。
  */
-function businessPenaltyMultiplier(signals, weights) {
-  const videoPenalty = Number(signals.video_source_penalty ?? 0) * Number(weights.video_source_penalty ?? 0);
-  const cityPenalty =
-    Number(signals.city_place_specific_penalty ?? 0) * Number(weights.city_place_specific_penalty ?? 0);
-  return Math.min(1, Math.max(MIN_BUSINESS_PENALTY_MULTIPLIER, 1 + videoPenalty + cityPenalty));
-}
-
-/**
- * 流程 5.6：输出面向 agent 阅读的检索结果；不暴露内部派生字段。
- */
-function resultForChunk(chunk, score, matches) {
-  return {
+function resultForChunk(chunk, score, matches, business) {
+  const result = {
     chunk_id: chunk.chunk_id,
     source_uri: chunk.source_uri,
     title: chunk.title,
@@ -599,25 +579,24 @@ function resultForChunk(chunk, score, matches) {
     candidate_cities: chunk.candidate_cities,
     text: chunk.text,
   };
+  if (business?.place_specific) result.place_specific = true;
+  if (business?.tier) result.tier = business.tier;
+  return result;
 }
 
 /**
  * 流程 5.2-5.3：综合评分。
  *
  * 评分规则：
- * 1. 先为 chunk 计算六个信号分：
+ * 1. 先为 chunk 计算四个相关性信号分：
  *    - keyword_match：主题词、自由查询词或实体别名命中标题或正文的比例。
  *    - route_entity_match：candidate_places/candidate_cities 或标题、来源、正文中的实体别名命中。
  *    - title_source_match：实体别名是否命中标题、source_uri 或 resource_path。
  *    - query_embedding_similarity：query 向量和 chunk.embedding 的非负余弦相似度。
- *    - video_source_penalty：视频来源 chunk 记为 1，非视频记为 0；该信号使用负权重降低视频素材排序。
- *    - city_place_specific_penalty：城市检索下，绑定具体景点的 chunk 记为 1；按 theme 选择负权重软降级。
- * 2. 再根据是否有 queryVector、是否有实体目标和城市 theme 选择权重 profile。
+ * 2. 再根据是否有 queryVector、是否有实体目标选择权重 profile。
  * 3. 总分 = 每个信号分 * 对应权重后求和，并通过 scoreBreakdown 保留 contributions 供日志解释。
  * 4. matched_by 只记录参与召回/排序的命中信号；embedding 相似度大于 0 时额外标记 embedding。
- * 5. 另输出 `businessPenaltyMultiplier`，与 score/matches/breakdown 平级；它是同一份 signals 和
- *    weights 的乘性折算，**只供 rerank 消费**，不参与主流程排序，也不进 breakdown（breakdown 的
- *    契约是「每个信号 × 权重 = 贡献」，插入非贡献值会破坏它的可加性）。
+ * 5. 另输出 `business`，用于召回窗口和最终排序；不进入 breakdown，保证 breakdown 保持可加性。
  */
 function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
   // 计算 keyword_match：主题词、自由 query 词和实体别名在标题、正文中的命中比例。
@@ -628,32 +607,24 @@ function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
   const titleSource = titleSourceScore(chunk, aliases);
   // 计算 query_embedding_similarity：queryVector 与 chunk.embedding 的非负余弦相似度。
   const embedding = cosineScore(queryVector, chunk.embedding);
-  // 计算 video_source_penalty：视频 chunk 记为 1，后续乘以负权重，降低但不直接剔除。
-  const videoPenalty = isVideoChunk(chunk) ? 1 : 0;
-  // 计算 city_place_specific_penalty：城市检索时，绑定具体景点的 chunk 软降级。
-  const cityPlaceSpecificPenalty = cityPlaceSpecificPenaltySignal(chunk, entity);
   // 汇总原始信号分，字段名会和 scoreWeights() 返回的权重名一一对应。
   const signals = {
     query_embedding_similarity: embedding,
     keyword_match: keyword,
     route_entity_match: routeEntity,
     title_source_match: titleSource,
-    video_source_penalty: videoPenalty,
-    city_place_specific_penalty: cityPlaceSpecificPenalty,
   };
-  // 按“是否有向量、是否有实体目标和城市 theme”选择权重，并计算各分项贡献与最终总分。
-  const breakdown = scoreBreakdown(signals, scoreWeights(queryVector.length > 0, entity, theme));
+  // 按“是否有向量、是否有实体目标”选择权重，并计算各分项贡献与最终总分。
+  const breakdown = scoreBreakdown(signals, scoreWeights(queryVector.length > 0, entity));
   // 生成 matched_by，供结果和诊断日志解释这个 chunk 是被哪些信号命中的。
   const matches = matchedBy(chunk, entity, aliases, terms);
   // embedding 相似度只要大于 0，就把 embedding 也记录为命中信号。
   if (embedding > 0) matches.push("embedding");
-  // 用同一份 signals 和 weights 折算业务 penalty 系数，供 rerank 乘性消费（不参与总分）。
-  const penaltyMultiplier = businessPenaltyMultiplier(signals, breakdown.weights);
   return {
     score: breakdown.total,
     matches,
     breakdown,
-    businessPenaltyMultiplier: penaltyMultiplier,
+    business: businessState(chunk, entity, theme),
   };
 }
 
@@ -702,22 +673,11 @@ function entityGate(chunk, entity) {
 /**
  * 流程 5.5：判断城市检索同分时是否更偏向城市级 chunk。
  *
- * 主排序已经通过 `city_place_specific_penalty` 软降级地点级 chunk；这里仅作为同分
- * tie-breaker，避免完全相同分数时地点级素材随机压过城市级素材。
+ * 这里只作为同分 tie-breaker，避免完全相同分数时地点级素材随机压过城市级素材。
  */
 function cityLevelPriority(result, entity) {
   if (entity?.type !== "city") return 0;
   return result.matched_by.includes("candidate_cities") && result.candidate_places.length === 0 ? 1 : 0;
-}
-
-/**
- * 流程 5.5：按总分和命中信号数量排序，供通用检索使用。
- */
-function compareResults(left, right) {
-  return (
-    right.score - left.score ||
-    right.matched_by.length - left.matched_by.length
-  );
 }
 
 /**
@@ -731,16 +691,27 @@ function compareStableFields(left, right) {
 }
 
 /**
- * 流程 5.5：排序候选结果。
- *
- * 所有检索都先按总分和命中信号数量排序；城市检索只在这些排序条件相同的时候，
- * 再偏向没有绑定具体景点的城市级 chunk。
+ * 流程 5.5：召回窗口排序。档位是不可翻越约束，必须先于相关性分生效。
  */
-function compareResultsForEntity(left, right, entity) {
+function compareRowsForRecall(left, right) {
   return (
-    compareResults(left, right) ||
-    cityLevelPriority(right, entity) - cityLevelPriority(left, entity) ||
-    compareStableFields(left, right)
+    left.scored.business.tier - right.scored.business.tier ||
+    right.scored.score - left.scored.score ||
+    right.scored.matches.length - left.scored.matches.length ||
+    compareStableFields(left.chunk, right.chunk)
+  );
+}
+
+/**
+ * 流程 5.6：未实际 rerank 时的最终业务排序。
+ */
+function compareRowsForFinalRanking(left, right, entity) {
+  return (
+    left.scored.business.tier - right.scored.business.tier ||
+    right.scored.score * right.scored.business.tilt_multiplier - left.scored.score * left.scored.business.tilt_multiplier ||
+    right.scored.matches.length - left.scored.matches.length ||
+    cityLevelPriority(right.result, entity) - cityLevelPriority(left.result, entity) ||
+    compareStableFields(left.chunk, right.chunk)
   );
 }
 
@@ -761,9 +732,9 @@ function vectorTrace(queryVector, chunk, similarity) {
  * 流程 6：为单个 chunk 生成调试日志项。
  *
  * `recall_status` 在接入 rerank 后多一种取值：`reranked_filtered` 表示该 chunk 进入了 rerank
- * 窗口但概率低于阈值被过滤，用来和「综合分不够」的 `scored_not_selected` 区分开。
+ * 窗口但概率低于阈值被过滤，用来和「相关性分或排序不够」的 `scored_not_selected` 区分开。
  *
- * `candidate_rank` 始终是 rerank 前的综合分名次；`selected_rank` 按最终输出顺序计算，
+ * `candidate_rank` 始终是 rerank 前召回窗口排序名次；`selected_rank` 按最终输出顺序计算，
  * 因此启用 rerank 后两者不一致是正常现象。
  */
 function diagnosticForRow(row, selectedIds, eligibleRanks, rerankedFilteredIds = new Set()) {
@@ -784,6 +755,7 @@ function diagnosticForRow(row, selectedIds, eligibleRanks, rerankedFilteredIds =
     matched_by: row.result.matched_by,
     vector_match: vectorTrace(row.queryVector, row.chunk, row.scored.breakdown.signals.query_embedding_similarity),
     score: row.scored.breakdown,
+    business: row.scored.business,
     candidate_places: row.chunk.candidate_places,
     candidate_cities: row.chunk.candidate_cities,
   };
@@ -793,7 +765,7 @@ function diagnosticForRow(row, selectedIds, eligibleRanks, rerankedFilteredIds =
  * 流程 6：生成单次 retrieve() 的完整调试日志。
  *
  * `rerank` 是 rag_rerank.mjs 的诊断块：未启用时记录 enabled/applied/skipped_reason，
- * 启用时额外记录 rerank query、概率、阈值判定和业务 penalty。只有 includeDiagnostics 为 true
+ * 启用时额外记录 rerank query、概率、阈值判定和软降权乘子。只有 includeDiagnostics 为 true
  * 时才会出现在输出里，普通检索结果不含任何 rerank 明细。
  */
 function retrievalDiagnostics({
@@ -854,7 +826,7 @@ export function writeRetrievalLog(logPath, payload) {
  * 流程 5.6：可选 rerank 接入点。
  *
  * 位置固定：候选行排序完成之后、截断到 topK 之前。rerank 只重排和过滤候选窗口，
- * 不改变 entity gate、综合评分和 matched_by，因此 `result.score` 仍是原始综合分。
+ * 不改变 entity gate、相关性评分和 matched_by，因此 `result.score` 仍是相关性分。
  *
  * 未启用 rerank 时 rag_rerank.rerankRows() 会立刻原样返回 rankedRows，不访问网络，
  * 同时给出 enabled:false 的诊断块，让 `--log` 能解释「这次为什么没有走 rerank」。
@@ -893,25 +865,28 @@ export async function retrieve(indexOrPath, options = {}) {
     }
     if (!gate.passed && !options.includeDiagnostics) continue;
 
-    // 用 queryVector 和每个 chunk.embedding 计算相似度，再结合关键词、实体 gate 和标题/来源命中综合排序。
+    // 用 queryVector 和每个 chunk.embedding 计算相似度，再结合关键词、实体 gate 和标题/来源命中计算相关性分。
     const scored = scoreChunk(chunk, entity, aliases, terms, queryVector, theme);
     rows.push({
       chunk,
       gate,
       scored,
       queryVector,
-      result: resultForChunk(chunk, scored.score, scored.matches),
+      result: resultForChunk(chunk, scored.score, scored.matches, scored.business),
     });
   }
   const rankedRows = rows
-    .filter((row) => row.gate.passed && row.result.score > 0)
-    .sort((left, right) => compareResultsForEntity(left.result, right.result, entity));
+    .filter((row) => row.gate.passed && row.scored.score > 0)
+    .sort(compareRowsForRecall);
   // 流程 5.6：可选 rerank。rerank query 由 rag_rerank.mjs 按固定模板表生成，
   // 这里只传检索上下文，避免两处维护同一套模板。
   const reranked = await maybeRerankRows(rankedRows, { query, entity, theme, topK }, options.rerank);
+  const finalRows = reranked.diagnostics?.applied
+    ? reranked.rows
+    : [...reranked.rows].sort((left, right) => compareRowsForFinalRanking(left, right, entity));
   // 流程 5.7：截断到 topK。rerank 已过滤掉低于阈值和窗口外的候选，
   // 因此启用 rerank 时 results 可能少于 topK 条，也不从窗口外补位。
-  const selectedRows = reranked.rows.slice(0, topK);
+  const selectedRows = finalRows.slice(0, topK);
   const results = selectedRows.map((row) => row.result);
 
   const output = {

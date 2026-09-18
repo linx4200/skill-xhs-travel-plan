@@ -10,6 +10,19 @@
 
 ---
 
+## 0. 术语约定
+
+| 术语 | 含义 |
+|---|---|
+| `rerank-off` | 不启用 cross-encoder rerank 的检索路径。候选通过 gate 后，只用主流程的相关性分、档位和软降权完成排序与 `topK` 截断。当前 `rag:workspace` 默认走这条路径。 |
+| `rerank-on` | 显式启用 rerank，且当前 `entity.type + theme` 命中 rerank 范围的检索路径。主流程先给 rerank 准备候选窗口，rerank 用 `probability` 做主题相关性准入，再由业务重排给出最终顺序。 |
+| 不可翻越 | 一种硬排序约束：低优先档不能凭更高相关性分或更高 rerank 概率排到高优先档前面。对 `backup_places` 来说，城市级 chunk 是高优先档，地点级 chunk 是降档；只要二者都通过 gate，且 rerank-on 时都通过概率阈值，城市级必须排在地点级之前。 |
+| 软降权 | 一种可被相关性翻越的排序倾斜：不改变候选是否进入召回窗口，也不建立硬档位，只在最终排序时把分数乘以小于 1 的系数。例如视频 `tilt=0.15` 表示最终排序分乘 `0.85`；如果它的相关性足够高，仍然可以排在非视频内容前面。 |
+| 档位（tier） | 用整数表达的硬优先级，数值越小优先级越高。当前只使用 `0` / `1`：`0` 表示高优先档，`1` 表示降档。 |
+| 相关性分（relevance） | 只由 embedding、关键词、实体命中、标题/来源命中组成的分数，不包含视频、城市地点级等业务调整。 |
+
+---
+
 ## 1. 触发原因
 
 `city_place_specific_penalty` 的真实意图是**档位**——「城市级查询应优先拿无具体景点的笔记」。当前实现用加性分数项（`-0.115 ~ -0.3`）表达，这种形式下档位**可以被相关性或 rerank 概率翻越**，与意图不符。
@@ -218,16 +231,16 @@ export const RAG_SCORING = {
 | `scripts/rag/rag_retrieve.mjs` | `scoreWeights()` 权重表（4 profile）、`scoreBreakdown()`、`scoreChunk()` 返回值、新增 `businessState()` / `tiltMultiplier()`、删除 `businessPenaltyMultiplier()`、`cityPlaceSpecificPenaltyWeight()` / `cityPlaceSpecificPenaltySignal()` 并入 `businessState()` 后删除、`rankedRows` 过滤条件与排序键、rerank-off 最终排序、`resultForChunk()`、`diagnosticForRow()` |
 | `scripts/rag/rag_rerank.mjs` | `penaltyMultiplierOf()` → 读 `scored.business.tilt_multiplier`（R1 阶段先加 `?? scored.businessPenaltyMultiplier ?? 1` 兼容读取，避免排序键切换前的空窗）；新增 `tierOf()`；`compareRerankedRows()` 首键改 tier；items 增 `tier`；文件头职责说明 |
 | `test/rag_retrieve.test.mjs` | 8 处评分断言（`score.contributions.city_place_specific_penalty` × 5、`score.weights.city_place_specific_penalty` × 1、`score.total` × 1、`score.signals.video_source_penalty` × 1）改为断言 `business.tier` / `business.tilt_multiplier` |
-| `scripts/rag/create_retrieval_workspace.mjs` | **不改**；仅回归验证（`--rerank` 透传属 rerank 阶段 6，本次不碰） |
+| `scripts/rag/create_retrieval_workspace.mjs` | 同步 `retrieval.scoring` 元信息：发布 `business_rules`（`city_tier_themes` / `video_tilt` / `city_tilt`），并保证元信息与 `RAG_SCORING`、实际相关性权重一致 |
 | `references/rag-rerank-*.md` | 回写：penalty 折算位置、排序键、诊断字段、`business_rules` 元信息 |
 
 ---
 
 ## 6. 分阶段执行
 
-**提交粒度**：R1~R4 各自独立提交。R1 与 R2 之间存在一个「rerank 暂时只读到兼容字段」的空窗（见 R1 第 8 步），但该空窗只在 CLI `--rerank` 路径可见 —— rerank 尚未接入 `create_retrieval_workspace.mjs` 生产链路，可接受；不过 R2 要紧接 R1 做完再跑联调，不要停在中间态上评估 rerank 效果。
+**提交粒度**：R1~R4 各自独立提交；R1 是 `rerank-off` 可独立验收状态，R2 是 `rerank-on` 可独立验收状态。R1 与 R2 之间的中间态允许 `npm test` 通过，但不用于评估 rerank 效果，也不作为对外可交付状态。若本轮执行会启用 `--rerank` 做联调，R1 与 R2 必须连续完成后再跑联调。
 
-### R1 · 评分分层 + 排序键统一（`rag_retrieval_config.mjs` + `rag_retrieve.mjs` + `rag_rerank.mjs` 兼容读取）
+### R1 · 评分分层 + rerank-off 排序键统一（`rag_retrieval_config.mjs` + `rag_retrieve.mjs` + `rag_rerank.mjs` 兼容读取）
 
 1. config 新增 `RAG_SCORING`，删除 `CITY_PLACE_SPECIFIC_PENALTY_BY_THEME` / `DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT`。
 2. `scoreWeights()` 4 个 profile 删掉 `video_source_penalty` / `city_place_specific_penalty` 两项权重。
@@ -239,9 +252,9 @@ export const RAG_SCORING = {
 8. `rag_rerank.mjs` 的 `penaltyMultiplierOf()` 临时加兼容读取 `scored.business.tilt_multiplier ?? scored.businessPenaltyMultiplier ?? 1`——**本步不改 rerank 排序键**，避免在排序键切换前把业务约束整段丢掉。
 9. 更新 `test/rag_retrieve.test.mjs`（8 处评分断言）。
 
-**为什么结构与排序键必须同一步做完**：只改结构不改排序键会落到「业务约束被整段移除」的中间态（`score` 已不含 penalty，比较器却还在读 `score`），比改前更差；只改排序键不改结构则无处取 `tier`。两者不可分割。
+**为什么结构与 rerank-off 排序键必须同一步做完**：只改结构不改排序键会落到「业务约束被整段移除」的中间态（`score` 已不含 penalty，比较器却还在读 `score`），比改前更差；只改排序键不改结构则无处取 `tier`。两者不可分割。
 
-**验收**：`npm test` 全绿；`breakdown` 只剩 4 个信号；`business` 块字段齐全；**构造 fixture（城市级 relevance 0.4 / 地点级 relevance 0.9）→ 城市级仍排第一，档位不可翻越**；档内 `result.score` 与顺序单调。
+**验收**：`npm test` 全绿；`breakdown` 只剩 4 个信号；`business` 块字段齐全；**rerank-off 构造 fixture（城市级 relevance 0.4 / 地点级 relevance 0.9）→ 城市级仍排第一，档位不可翻越**；档内 `result.score` 与顺序单调。
 
 ### R2 · rerank 消费新契约（`rag_rerank.mjs`）
 
@@ -256,14 +269,15 @@ export const RAG_SCORING = {
 
 1. `diagnosticForRow()` 输出 `business` 块。
 2. 回写 `references/rag-rerank-technical-design.md`（排序键、penalty 折算位置、档位与 tilt 语义、对外字段）与 `references/rag-rerank-execution-plan.md`（新增「实现偏离 / 已修正」条目）。
-3. 在 rerank 阶段 6 的 `retrieval.scoring` 元信息里预留 `business_rules`（`city_tier_themes` / `video_tilt` / `city_tilt`），与 4.6 的对外事实字段配套。
+3. `create_retrieval_workspace.mjs` 发布 `retrieval.scoring.business_rules`（`city_tier_themes` / `video_tilt` / `city_tilt`），与 4.6 的对外事实字段配套。
+4. `create_retrieval_workspace.test.mjs` 增加元信息断言：`business_rules` 存在，且与 `RAG_SCORING` 一致。
 
 ### R4 · 验证
 
 | 项 | 内容 |
 |---|---|
-| 单测 | 更新后的 `rag_retrieve.test.mjs` + 新增「档位不可翻越」用例 |
-| 冒烟 | 现有 10 组 rerank 冒烟（`tier` 加入后 fixture 需补 `scored.business`） |
+| 单测 | 更新后的 `rag_retrieve.test.mjs` + 新增「rerank-off 档位不可翻越」用例 + `create_retrieval_workspace.test.mjs` 的 `business_rules` 元信息断言 |
+| 冒烟 | 现有 10 组 rerank 冒烟（`tier` 加入后 fixture 需补 `scored.business`）；新增「tier 0 + prob 0.91 排在 tier 1 + prob 0.99 前」fixture |
 | 端到端 · 档位 | 毕节 `backup_places`（19 eligible / 4 城市级）、昭通（1 城市级）：城市级全部在窗口内且排在档内首位 |
 | 端到端 · 全扫 | 3 城市 × 5 theme，对照改前/改后的 `results` 顺序 diff 与 eligible 数。**顺序变化需逐条确认属于「修意图偏离」而非新缺陷**（决策 5 已接受该变化） |
 | 端到端 · rerank | `大山包/highlights` 真实服务联调（住宿 0.079 / 餐饮 0.109 仍被过滤） |

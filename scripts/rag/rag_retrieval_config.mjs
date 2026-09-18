@@ -42,20 +42,19 @@ export const CITY_THEMES = {
   notes: ["风险", "注意", "安全", "贴士", "tips", "天气", "海拔", "温差", "高反", "绕路", "限流", "堵车", "物价", "宰客", "预约", "关门"],
 };
 
-/**
- * 城市检索中，命中目标城市但同时绑定具体 `candidate_places` 的地点级 chunk 软惩罚。
- *
- * `backup_places` 主题用于寻找“有城市归属但没有具体地点归属”的城市级备选信息，
- * 因此对地点级 chunk 扣分最重；未知城市主题使用默认值，避免地点级 chunk 在泛城市
- * 查询中挤占城市级吃住行和风险材料。
- */
-export const DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT = -0.12;
-export const CITY_PLACE_SPECIFIC_PENALTY_BY_THEME = {
-  foods: -0.115,
-  lodging: -0.18,
-  transport: -0.12,
-  notes: -0.12,
-  backup_places: -0.3,
+export const RAG_SCORING = {
+  // 档位语义：这些 theme 的城市级 / 地点级材料是硬分层，低优先档不可翻越高优先档。
+  cityTierThemes: ["backup_places"],
+
+  // 软降权语义：降权幅度（0~1），乘子 = 1 - tilt。
+  videoTilt: 0.15,
+  defaultCityTilt: 0.1,
+  cityTiltByTheme: {
+    foods: 0.1,
+    lodging: 0.1,
+    transport: 0.1,
+    notes: 0.1,
+  },
 };
 
 export const RAG_RETRIEVAL_DEFAULTS = {
