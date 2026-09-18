@@ -231,6 +231,59 @@ test("backup places theme puts place-specific city chunks in a lower tier", asyn
   assert.equal(placeBackup.score.total > result.diagnostics.chunks.find((item) => item.chunk_id === "city-backup").score.total, true);
 });
 
+test("rerank keeps backup places tier above higher probability place-specific chunks", async () => {
+  const backupPlacesIndex = {
+    chunks: [
+      {
+        chunk_id: "city-backup",
+        source_uri: "resources/city-backup.json",
+        resource_path: "city-backup.json",
+        title: "甲城市备选",
+        text: "冷门 小众。",
+        candidate_places: [],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+      {
+        chunk_id: "place-backup",
+        source_uri: "resources/place-backup.json",
+        resource_path: "place-backup.json",
+        title: "甲城市观景台",
+        text: "景点 打卡点 冷门 小众 顺路 附近。",
+        candidate_places: ["A地方"],
+        candidate_cities: ["甲城市"],
+        embedding: [],
+      },
+    ],
+  };
+
+  const result = await retrieve(backupPlacesIndex, {
+    city: "甲城市",
+    theme: "backup_places",
+    topK: 10,
+    includeDiagnostics: true,
+    rerank: {
+      enabled: true,
+      probThreshold: 0.9,
+      recallWidth: 10,
+      reranker: async ({ documents }) =>
+        documents.map((document) => ({
+          id: document.id,
+          probability: document.id === "city-backup" ? 0.91 : 0.99,
+        })),
+    },
+  });
+
+  assert.deepEqual(
+    result.results.map((item) => item.chunk_id),
+    ["city-backup", "place-backup"],
+  );
+  assert.equal(result.diagnostics.rerank.applied, true);
+  assert.equal(result.diagnostics.rerank.items.find((item) => item.chunk_id === "city-backup").tier, 0);
+  assert.equal(result.diagnostics.rerank.items.find((item) => item.chunk_id === "place-backup").tier, 1);
+  assert.equal(result.diagnostics.rerank.items.find((item) => item.chunk_id === "place-backup").final_rerank_score, 0.99);
+});
+
 test("city retrieval does not fall back to title or text city matches without candidate_cities", async () => {
   const result = await retrieve(index, { city: "乙城市", theme: "lodging", topK: 10 });
   assert.deepEqual(

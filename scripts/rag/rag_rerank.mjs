@@ -6,15 +6,15 @@
  * 2. 判断当前 `entity.type + theme` 是否需要 rerank；不在启用范围内时不访问网络。
  * 3. 取候选窗口前 `recallWidth` 条，按固定模板表生成 rerank query 和 documents。
  * 4. 调用本地 HTTP rerank 服务，并校验响应完整性（缺失结果、重复 id、非法概率都报错）。
- * 5. 按概率阈值过滤，乘回业务软降权 multiplier 得到 `final_rerank_score`，再按最终分重排。
+ * 5. 按概率阈值过滤，先按主流程给出的业务档位分层，再按业务软降权后的 rerank 分重排。
  *
  * 关键约定：
  * - 不改写 `result.score`。rerank 概率只用于重排、过滤和诊断，相关性分继续对外输出。
  * - 只在显式启用且 theme 在启用范围内时访问网络；未启用时零网络调用。
  * - 窗口外候选不参与补位：阈值过滤后允许某个 theme 返回少于 `topK` 条结果。
  * - 显式启用时不静默降级：服务不可用、超时或响应非法都直接抛错。
- * - 业务软降权 multiplier 由主流程 `rag_retrieve.mjs` 折算并给出，本模块只消费：
- *   优先读 `row.scored.business.tilt_multiplier`，兼容旧字段 `businessPenaltyMultiplier`。
+ * - 业务档位和软降权由主流程 `rag_retrieve.mjs` 折算并给出，本模块只消费：
+ *   读 `row.scored.business.tier` 和 `row.scored.business.tilt_multiplier`。
  *
  * 输入 `rows` 来自 `rag_retrieve.mjs` 的 `rankedRows`，元素结构为
  * `{ chunk, gate, scored, queryVector, result }`。
@@ -347,21 +347,30 @@ function cityLevelPriority(result, entity) {
 }
 
 /**
+ * 读取主流程给出的业务档位。拿不到或不是有限数按高优先档处理。
+ */
+function tierOf(row) {
+  const value = Number(row?.scored?.business?.tier);
+  return Number.isFinite(value) ? value : 0;
+}
+
+/**
  * 读取主流程给出的业务软降权 multiplier。
  *
- * 新契约是 `scored.business.tilt_multiplier`；R1 期间保留旧字段兼容，避免外部 fixture
- * 尚未迁移时把软降权整段丢掉。拿不到或不是有限数按 1 处理，避免 NaN 渗进最终分。
+ * 拿不到或不是有限数按 1 处理，避免 NaN 渗进最终分。
  */
 function penaltyMultiplierOf(row) {
-  const value = Number(row?.scored?.business?.tilt_multiplier ?? row?.scored?.businessPenaltyMultiplier);
+  const value = Number(row?.scored?.business?.tilt_multiplier);
   return Number.isFinite(value) ? value : 1;
 }
 
 /**
- * rerank 后排序：最终分优先，随后用相关性分、命中信号数量、城市级优先级和稳定字段兜底。
+ * rerank 后排序：档位优先，随后用软降权后的 rerank 分、相关性分、命中信号数量、
+ * 城市级优先级和稳定字段兜底。
  */
 function compareRerankedRows(left, right, entity) {
   return (
+    left.item.tier - right.item.tier ||
     right.item.final_rerank_score - left.item.final_rerank_score ||
     right.item.original_score - left.item.original_score ||
     matchCount(right.row) - matchCount(left.row) ||
@@ -379,7 +388,7 @@ function compareRerankedRows(left, right, entity) {
  * @param {object} config rerank overrides；也接受 `resolveRerankConfig()` 的结果。
  * @returns {Promise<{ rows: Array, diagnostics: object }>}
  *
- * 返回的 `rows` 只包含窗口内且过阈值的候选，并按 `final_rerank_score` 排序。
+ * 返回的 `rows` 只包含窗口内且过阈值的候选，并按档位和 `final_rerank_score` 排序。
  * 窗口外候选、以及窗口内被阈值过滤的候选都不再出现在返回值里，因此某个 theme
  * 可能少于 `topK` 条结果 —— 这是刻意的：不为凑满名额引入弱相关内容。
  * 跳过 rerank 时原样返回输入 rows。
@@ -451,6 +460,7 @@ export async function rerankRows(rows, request = {}, config = {}) {
   const scored = windowRows.map((row, index) => {
     const document = documents[index];
     const probability = probabilities.get(document.id);
+    const tier = tierOf(row);
     const penaltyMultiplier = penaltyMultiplierOf(row);
     const passedThreshold = probability >= resolved.probThreshold;
     return {
@@ -460,6 +470,7 @@ export async function rerankRows(rows, request = {}, config = {}) {
         chunk_id: document.id,
         original_rank: index + 1,
         original_score: round4(originalScore(row)),
+        tier,
         rerank_probability: round4(probability),
         passed_threshold: passedThreshold,
         penalty_multiplier: round4(penaltyMultiplier),

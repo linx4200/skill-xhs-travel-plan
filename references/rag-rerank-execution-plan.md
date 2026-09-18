@@ -4,7 +4,7 @@
 
 ## 当前执行顺序
 
-阶段 0-5 已完成 rerank 服务、项目内 rerank client 和 `rag_retrieve.mjs` 单点接入。继续执行阶段 6 之前，先执行 `references/rag-ranking-refactor-plan.md` 的 R1/R2/R3 核心契约：
+阶段 0-5 已完成 rerank 服务、项目内 rerank client 和 `rag_retrieve.mjs` 单点接入。阶段 6 及之后以 `references/rag-ranking-refactor-plan.md` 的 R1/R2/R3 核心契约为前置：
 
 - `result.score` 改为纯相关性分。
 - `score.breakdown` 只保留相关性信号。
@@ -12,7 +12,7 @@
 - rerank 模块只消费 `scored.business.tier` 和 `scored.business.tilt_multiplier`，不再读取旧 `businessPenaltyMultiplier`。
 - `create_retrieval_workspace.mjs` 的 `retrieval.scoring` 同步发布 `business_rules`。
 
-阶段 6 及之后只按上述新契约实现和验收，不再基于旧的 `businessPenaltyMultiplier` / 加性 penalty 语义扩展批量链路。
+阶段 6 及之后只按上述新契约实现和验收。
 
 ## 阶段 0：确认边界
 

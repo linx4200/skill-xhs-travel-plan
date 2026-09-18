@@ -6,7 +6,7 @@
 
 - 提高每个 target/theme 返回结果的主题相关性，优先解决 `highlights`、`nearby`、`facilities` 和城市 `backup_places` 中泛化触发词带来的跨主题误排。
 - rerank 只在实体 gate 之后、theme 内排序截断之前生效。
-- rerank 保留现有业务约束：视频来源降权和城市检索中的地点级 chunk 软惩罚必须继续影响最终结果。
+- rerank 保留主流程业务约束：`backup_places` 的城市级 / 地点级硬档位不可翻越，视频来源和非档位 city theme 的地点级 chunk 只做软降权。
 - rerank 允许某个 theme 返回少于 `topK` 条结果；无关内容不为凑满名额进入阅读池。
 - rerank 不改变 agent 填写 facts 的职责：`retrieval-workspace.json` 仍只提供阅读索引，不自动判断最终攻略事实。
 
@@ -24,11 +24,11 @@ Rerank 接在 `scripts/rag/rag_retrieve.mjs` 的 `retrieve()` 内：
 
 1. 读取索引并生成 embedding query、rerank query、terms、aliases。
 2. 调用 embedding API 得到 `queryVector`。
-3. 遍历 `index.chunks`，执行 entity gate 和现有综合打分。
-4. 得到 `rankedRows`。
+3. 遍历 `index.chunks`，执行 entity gate，计算纯相关性分和业务状态。
+4. 按 `tier asc -> relevance desc` 得到 rerank 候选窗口排序。
 5. 对命中的高风险 theme 取前 `recallWidth` 条执行 rerank。
 6. 根据 rerank 概率阈值过滤候选。
-7. 把业务 penalty 作为后处理排序信号保留。
+7. 按 `tier asc -> probability × tilt_multiplier desc -> relevance desc` 重排。
 8. 截断到 `topK`，生成 `results`。
 
 批量入口 `scripts/rag/create_retrieval_workspace.mjs` 只负责透传 rerank 配置。`collectThemeResults()` 的跨 theme 去重、阅读池名额和 `retrieval_health` 规则保持同一职责边界。
@@ -105,6 +105,7 @@ export async function rerankRows(rows, request, config = {})
         chunk_id: string,
         original_rank: number,
         original_score: number,
+        tier: number,
         rerank_probability: number,
         passed_threshold: boolean,
         penalty_multiplier: number,
@@ -211,32 +212,40 @@ const reranked = await maybeRerankRows(rankedRows, {
 const selectedRows = reranked.rows.slice(0, topK);
 ```
 
-另新增 `businessPenaltyMultiplier(signals, weights)` 与常量 `MIN_BUSINESS_PENALTY_MULTIPLIER`；`scoreChunk()` 的返回值在 `score` / `matches` / `breakdown` 之外**平级**增加 `businessPenaltyMultiplier`（不进 `breakdown`——那个对象的契约是「每个信号 × 权重 = 贡献」，插入非贡献值会破坏可加性）。折算规则见「排序后处理规则」。
+`scoreChunk()` 的返回值在 `score` / `matches` / `breakdown` 之外**平级**增加 `business`。`breakdown` 只包含 `query_embedding_similarity` / `keyword_match` / `route_entity_match` / `title_source_match` 四个相关性信号；`score` 等于 `breakdown.total`，对外表示材料相关性。
+
+`business` 结构：
+
+```js
+{
+  tier,                       // 0 = 高优先档，1 = 降档
+  tilt_multiplier,            // 软降权乘子，不表达硬档位
+  is_video,
+  place_specific
+}
+```
 
 排序后处理规则：
 
 - rerank 只改变参与 rerank 窗口内 rows 的顺序和过滤状态。
 - 未进入 rerank 窗口的候选不参与最终补位；阈值过滤后不从窗口外拉候选补满。
-- 最终排序使用 `final_rerank_score`，同分时使用原始综合分、命中信号数量、城市级优先级和稳定字段兜底。
-- `video_source_penalty` 与 `city_place_specific_penalty` 通过 penalty multiplier 或后处理扣分继续生效。
+- rerank-off 最终排序使用 `tier asc -> relevance × tilt_multiplier desc -> matched_by.length desc -> cityLevelPriority desc -> 稳定字段`。
+- rerank-on 最终排序使用 `tier asc -> final_rerank_score desc -> relevance desc -> matched_by.length desc -> cityLevelPriority desc -> 稳定字段`。
+- `final_rerank_score = probability × tilt_multiplier`；`tier` 是独立第一排序键，不折进 `final_rerank_score`。
+- 诊断字段 `penalty_multiplier` 保留原名，含义为软降权乘子，即 `tilt_multiplier`。
 
-推荐后处理公式：
+业务规则配置：
 
-```text
-businessPenalty = 1
-  + video_source_penalty_signal * VIDEO_CHUNK_PENALTY_WEIGHT
-  + city_place_specific_penalty_signal * city_place_specific_penalty_weight
-
-final_rerank_score = rerank_probability * clamp(businessPenalty, 0.01, 1)
+```js
+export const RAG_SCORING = {
+  cityTierThemes: ["backup_places"],
+  videoTilt: 0.15,
+  defaultCityTilt: 0.10,
+  cityTiltByTheme: { foods: 0.10, lodging: 0.10, transport: 0.10, notes: 0.10 },
+};
 ```
 
-**实现位置**：这个折算的函数体住在主流程 `scripts/rag/rag_retrieve.mjs`（`businessPenaltyMultiplier(signals, weights)`，下限常量 `MIN_BUSINESS_PENALTY_MULTIPLIER`），由 `scoreChunk()` 与 `score` / `matches` / `breakdown` 平级输出 `businessPenaltyMultiplier`。rerank 模块不重写这个公式，只读 `row.scored.businessPenaltyMultiplier` 相乘（缺失或非有限数按 1）。
-
-这样分工的理由：rerank 是旁支，业务 penalty 是主流程规则。折算若写在 rerank 侧，主流程新增第三条 penalty 时旁支不会跟着变——rerank 启用时那条规则静默失效。
-
-clamp 上限 1 只对「降权」语义成立。当前两条 penalty 都是负向，没有问题；将来若要加正向修正信号（例如官方来源加权），上限会把它切掉，改动时需一并调整。
-
-公式只用于 rerank 后排序，不写入普通 `result.score` 覆盖现有综合分。`result.score` 保留原始检索分，便于兼容现有 workspace 和测试；rerank 细节只进入诊断日志和 `retrieval.scoring` 元信息。
+`result.score` 不写入 rerank 概率、档位或软降权数值。跨档时最终顺序可以不按 `score` 单调；`results[]` 用 `place_specific: true` 和 `tier: 1` 暴露事实字段，`retrieval.scoring.business_rules` 发布规则元信息。
 
 ### 修改 `scripts/rag/create_retrieval_workspace.mjs`
 
@@ -258,6 +267,19 @@ clamp 上限 1 只对「降权」语义成立。当前两条 penalty 都是负�
 ```json
 {
   "strategy": "candidate_gated_embedding_keyword_entity_title_rerank",
+  "business_rules": {
+    "city_tier_themes": ["backup_places"],
+    "video_tilt": 0.15,
+    "city_tilt": {
+      "default": 0.1,
+      "by_theme": {
+        "foods": 0.1,
+        "lodging": 0.1,
+        "transport": 0.1,
+        "notes": 0.1
+      }
+    }
+  },
   "rerank": {
     "enabled": true,
     "url": "http://localhost:11435/rerank",
@@ -270,15 +292,12 @@ clamp 上限 1 只对「降权」语义成立。当前两条 penalty 都是负�
       "all_themes": false
     },
     "threshold_filtering": true,
-    "business_penalties_preserved": [
-      "video_source_penalty",
-      "city_place_specific_penalty"
-    ]
+    "business_rules_preserved": true
   }
 }
 ```
 
-`themes.<theme>[]` 保持只写 `chunk_id`、`score`、`matched_by`。rerank 不把概率写入 `retrieval-workspace.json` 的常规阅读索引，避免 agent 把模型概率当作事实依据。
+`themes.<theme>[]` 保持轻量阅读索引：固定写 `chunk_id`、`score`、`matched_by`，在需要解释业务排序时写 `place_specific: true` / `tier: 1`。rerank 不把概率、`final_rerank_score` 或 `tilt_multiplier` 写入 `retrieval-workspace.json` 的常规阅读索引，避免 agent 把模型概率或内部权重当作事实依据。
 
 `theme_scope` 由 `rerankThemeScope()` 生成，直接照抄上述结构。`all_themes` 反映是否处于 `--rerank-all-themes` 模式：为 `true` 时 `place` / `city` 两个列表仍照常输出，但**已不代表本次实际启用范围**，消费方必须以 `all_themes` 为准。
 
@@ -461,6 +480,7 @@ npm run rag:workspace -- \
       "chunk_id": "020-dashanbao-note.md#1",
       "original_rank": 7,
       "original_score": 0.6821,
+      "tier": 0,
       "rerank_probability": 0.9987,
       "passed_threshold": true,
       "penalty_multiplier": 1,
@@ -470,7 +490,20 @@ npm run rag:workspace -- \
 }
 ```
 
-`diagnosticForRow()` 继续记录原始评分 breakdown。`recall_status` 的判定增加 rerank 语义：
+`diagnosticForRow()` 记录纯相关性 `score` breakdown，并增加 `business` 块：
+
+```json
+{
+  "business": {
+    "tier": 0,
+    "tilt_multiplier": 1,
+    "is_video": false,
+    "place_specific": false
+  }
+}
+```
+
+`recall_status` 的判定增加 rerank 语义：
 
 - `selected`
 - `reranked_filtered`
@@ -478,7 +511,7 @@ npm run rag:workspace -- \
 - `zero_score`
 - `filtered_by_entity_gate`
 
-`selected_rank` 按最终输出顺序计算。`candidate_rank` 保持原始综合分排序名次。
+`selected_rank` 按最终输出顺序计算。`candidate_rank` 保持 rerank 前召回窗口排序名次。
 
 ## 错误处理
 
@@ -500,8 +533,8 @@ npm run rag:workspace -- \
 - mock reranker 返回概率后，rows 按概率重排。
 - 低于阈值的候选被过滤。
 - 阈值过滤后结果数量可以少于 `topK`。
-- `video_source_penalty` 会降低 `final_rerank_score`。
-- 城市 `backup_places` 下地点级 chunk 的 city penalty 保留。
+- `scored.business.tilt_multiplier` 会降低 `final_rerank_score`。
+- 城市 `backup_places` 下地点级 chunk 的 `tier: 1` 不会被更高 rerank 概率翻越。
 - 非白名单 theme 返回原始 rows，并给出 skipped diagnostics。
 - mock HTTP client 返回乱序结果时，项目侧按 document id 对齐。
 - API 缺失结果、重复 id 或非法概率时抛错。
@@ -514,7 +547,8 @@ npm run rag:workspace -- \
 - mock rerank client 给景观 chunk 高分、住宿餐饮低分。
 - 调用 `retrieve(index, { place, theme: "highlights", topK: 5, rerank: { enabled: true, reranker } })`。
 - 断言传给 mock rerank client 的 query 是自然语言模板结果，不是关键词堆。
-- 断言最终 `results` 只包含过阈值 chunk，且 `result.score` 仍是原始综合分。
+- 断言最终 `results` 只包含过阈值 chunk，且 `result.score` 仍是相关性分。
+- 城市 `backup_places` fixture 固定 `tier 0 + probability 0.91` 与 `tier 1 + probability 0.99`，断言 `tier 0` 仍排在前面。
 
 ### 批量测试：`test/create_retrieval_workspace.test.mjs`
 
@@ -522,6 +556,7 @@ npm run rag:workspace -- \
 
 - CLI options 透传到 `collectThemeResults()` 和 `retrieve()`。
 - `retrieval.scoring.rerank.enabled` 正确反映启用状态。
+- `retrieval.scoring.business_rules` 与 `RAG_SCORING` 一致。
 - `themes.<theme>[]` 不包含 rerank 概率字段。
 - 阈值过滤导致某 theme 为空时，`retrieval_health.warnings` 出现 `empty_theme:<theme>`。
 
@@ -574,7 +609,7 @@ node scripts/rag/rag_retrieve.mjs \
 - `result.score`、`themes.<theme>[]` 和 `chunks_by_id` 兼容现有消费方式。
 - rerank 诊断只在 `--log` 时写入日志。
 - 高风险 theme 允许少于 `topK` 条结果，并通过 `retrieval_health` 暴露空 theme 或弱召回提醒。
-- 视频来源和城市地点级 chunk 的业务 penalty 在 rerank 后仍能影响最终排序。
+- 视频来源软降权和城市地点级硬档位在 rerank 后仍能影响最终排序。
 - 项目仓库不新增 `@huggingface/transformers`、`onnxruntime` 或模型文件。
 - rerank 服务地址可通过 `--rerank-url` 或 `RAG_RERANK_URL` 配置。
 
@@ -597,7 +632,7 @@ node scripts/rag/rag_retrieve.mjs \
 - **`config` 字段**：除本文列出的键外，另兼容 CLI 别名 `rerankUrl` / `rerankModel` / `rerankRecallWidth` / `rerankThreshold` / `rerankTimeoutMs` / `rerankAllThemes` / `rerankTheme`，并新增传输层注入点 `httpClient({url, body, timeoutMs})`（注入时跳过 URL 校验）。`reranker` 的实际入参是 `({ model, query, documents })`，返回项支持纯数字 / `{probability}` / `{id, probability}`。
 - **`diagnostics` 字段**：除本文列出的键外，另增 `rerank_query`、`filtered_count`、`out_of_window_count`；`skipped_reason` 另增 `disabled`（未启用）与 `missing_entity`（`--query` 无实体）两种取值。
 - **doc 构造**：不再拼 `标题：…\n正文：…` 单字符串，改为 `{ id, title, text }` 分字段传给服务；`maxDocChars` 只截断 `text`，`text` 为空时退回 `title`。模型 prompt 拼装完全由服务负责。
-- **penalty 折算归属**：「推荐后处理公式」的函数体现定义在主流程 `rag_retrieve.mjs`，`rag_rerank.mjs` 只消费 `row.scored.businessPenaltyMultiplier`，不再 import `CITY_PLACE_SPECIFIC_PENALTY_BY_THEME` / `DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT`、不再持有权重常量。含义：rerank 侧的 `penalty_multiplier` 只有两种取值来源——主流程给的系数，或缺失时的 1。人工 fixture 不再能靠 `scored.breakdown.signals/weights` 间接驱动 penalty，相关断言须走主流程端到端路径。
+- **业务状态消费**：业务规则定义在主流程 `rag_retrieve.mjs`，`rag_rerank.mjs` 只消费 `row.scored.business.tier` 与 `row.scored.business.tilt_multiplier`，不 import 城市 theme 规则或权重常量。人工 fixture 不能靠 `scored.breakdown.signals/weights` 间接驱动业务排序，相关断言走主流程端到端路径。
 - **`rerankQuery` 生成方**：「接入位置」里 `retrieve()` 不再自己构造 `rerankQuery`，只传 `{ query, entity, theme, topK }`；模板渲染收在 `rag_rerank.mjs` 内，并回填到 `diagnostics.rerank.rerank_query`。
 - **传输层校验**：rerank 响应除本文列出的失败条件外，还要求 `results.length` 与请求 `documents.length` 严格相等。
 - **默认 URL**：本文配置块写 `http://localhost:11435/rerank`，实际统一为 `http://127.0.0.1:11435/rerank`。
