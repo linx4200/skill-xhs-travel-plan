@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { createRetrievalWorkspace } from "../scripts/rag/create_retrieval_workspace.mjs";
+import { RAG_SCORING } from "../scripts/rag/rag_retrieval_config.mjs";
 
 // 每个 place theme 取一个只在该 theme 词表里出现的触发词，保证「一个 chunk 只被一个主题强命中」。
 const ONE_TERM_PER_PLACE_THEME = {
@@ -54,6 +55,49 @@ function writeFixture() {
   return { factsPath, ragIndexPath, chunkCount: Object.keys(ONE_TERM_PER_PLACE_THEME).length };
 }
 
+function writeCityFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "retrieval-workspace-city-test-"));
+  const factsPath = path.join(dir, "facts-workspace.json");
+  const ragIndexPath = path.join(dir, "rag-index.json");
+
+  fs.writeFileSync(
+    factsPath,
+    JSON.stringify({ places: {}, cities: { 甲城市: { source_files: [] } } }),
+    "utf8",
+  );
+  fs.writeFileSync(
+    ragIndexPath,
+    JSON.stringify({
+      schema_version: 1,
+      chunks: [
+        {
+          chunk_id: "city-backup",
+          source_uri: "resources/city-backup.json",
+          resource_path: "city-backup.json",
+          title: "甲城市备选",
+          text: "冷门 小众 景点。",
+          candidate_places: [],
+          candidate_cities: ["甲城市"],
+          embedding: [],
+        },
+        {
+          chunk_id: "place-backup",
+          source_uri: "resources/place-backup.json",
+          resource_path: "place-backup.json",
+          title: "甲城市观景台",
+          text: "景点 打卡点 冷门 小众 顺路 附近。",
+          candidate_places: ["A地方"],
+          candidate_cities: ["甲城市"],
+          embedding: [],
+        },
+      ],
+    }),
+    "utf8",
+  );
+
+  return { factsPath, ragIndexPath };
+}
+
 /**
  * 引用完整性：unique_chunk_ids 和 themes.*[].chunk_id 都必须能在 chunks_by_id 里找到，
  * 且 chunks_by_id 不应残留没有任何 target 引用的 chunk。
@@ -93,6 +137,19 @@ test("阅读池名额足够时不会丢弃任何 chunk", async () => {
     dropped_by_theme: {},
   });
   assert.equal(place.retrieval_health.status, "ok");
+  assert.deepEqual(workspace.retrieval.scoring.business_rules, {
+    city_tier_themes: RAG_SCORING.cityTierThemes,
+    video_tilt: RAG_SCORING.videoTilt,
+    city_tilt: {
+      default: RAG_SCORING.defaultCityTilt,
+      by_theme: RAG_SCORING.cityTiltByTheme,
+    },
+  });
+  assert.deepEqual(workspace.retrieval.scoring.weights.entity_query, {
+    keyword_match: 0.55,
+    route_entity_match: 0.35,
+    title_source_match: 0.1,
+  });
   assertReferenceIntegrity(workspace);
 });
 
@@ -131,5 +188,22 @@ test("阅读池先到先得：名额占满后后续主题不再贡献新 chunk�
   assert.equal(place.retrieval_health.status, "weak");
   assert.ok(place.retrieval_health.warnings.includes(`quota_dropped:highlights:${droppedByTheme.highlights}`));
   assert.deepEqual(workspace.summary.attention_places, ["A地方"]);
+  assertReferenceIntegrity(workspace);
+});
+
+test("城市地点级解释字段会进入 theme 轻量索引", async () => {
+  const { factsPath, ragIndexPath } = writeCityFixture();
+  const workspace = await createRetrievalWorkspace(factsPath, ragIndexPath, { noEmbedding: true });
+  const backupItems = workspace.cities["甲城市"].themes.backup_places;
+
+  const cityLevel = backupItems.find((item) => item.chunk_id === "city-backup");
+  assert.equal(Object.hasOwn(cityLevel, "place_specific"), false);
+  assert.equal(Object.hasOwn(cityLevel, "tier"), false);
+
+  const placeSpecific = backupItems.find((item) => item.chunk_id === "place-backup");
+  assert.equal(placeSpecific.place_specific, true);
+  assert.equal(placeSpecific.tier, 1);
+  assert.equal(Object.hasOwn(placeSpecific, "tilt_multiplier"), false);
+  assert.equal(Object.hasOwn(placeSpecific, "final_rerank_score"), false);
   assertReferenceIntegrity(workspace);
 });

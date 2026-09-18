@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRagIndex, retrieve, writeRetrievalLog } from "./rag_retrieve.mjs";
-import { CITY_THEMES, PLACE_THEMES, RAG_RETRIEVAL_DEFAULTS } from "./rag_retrieval_config.mjs";
+import { CITY_THEMES, PLACE_THEMES, RAG_SCORING, RAG_RETRIEVAL_DEFAULTS } from "./rag_retrieval_config.mjs";
 
 /**
  * 解析批量检索命令参数，读取 facts workspace、RAG index 和输出路径。
@@ -91,11 +91,14 @@ function relativeToOut(filePath, outPath) {
  * 从检索结果中抽出放入 target theme 的轻量索引项。
  */
 function themeItem(result) {
-  return {
+  const item = {
     chunk_id: result.chunk_id,
     score: result.score,
     matched_by: result.matched_by,
   };
+  if (result.place_specific) item.place_specific = true;
+  if (result.tier) item.tier = result.tier;
+  return item;
 }
 
 /**
@@ -384,28 +387,36 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
         weights: usesEmbedding
           ? {
               entity_query: {
-                query_embedding_similarity: 0.45,
-                keyword_match: 0.25,
-                route_entity_match: 0.2,
-                title_source_match: 0.1,
+                query_embedding_similarity: 0.6,
+                keyword_match: 0.2,
+                route_entity_match: 0.15,
+                title_source_match: 0.05,
               },
               query_only: {
                 query_embedding_similarity: 0.7,
-                keyword_match: 0.2,
-                title_source_match: 0.1,
+                keyword_match: 0.25,
+                title_source_match: 0.05,
               },
             }
           : {
               entity_query: {
-                keyword_match: 0.45,
+                keyword_match: 0.55,
                 route_entity_match: 0.35,
-                title_source_match: 0.2,
+                title_source_match: 0.1,
               },
               query_only: {
                 keyword_match: 0.8,
                 title_source_match: 0.2,
               },
             },
+        business_rules: {
+          city_tier_themes: [...RAG_SCORING.cityTierThemes],
+          video_tilt: RAG_SCORING.videoTilt,
+          city_tilt: {
+            default: RAG_SCORING.defaultCityTilt,
+            by_theme: { ...RAG_SCORING.cityTiltByTheme },
+          },
+        },
       },
     },
     chunks_by_id: chunksById,
