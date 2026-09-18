@@ -99,11 +99,14 @@ Embedding 配置规则：
 
 - 常规 RAG 流程默认不启用 rerank。需要提高高风险 theme 的主题相关性时，才显式传 `--rerank`。
 - rerank 服务运行在当前项目外的全局本地目录，例如 `~/Documents/rag-reranker`。项目内不安装 `@huggingface/transformers`、`onnxruntime` 或模型文件。
-- 启用前先启动本地服务并确认健康状态：
+- 启用前先在独立终端或后台会话中启动本地服务，并确认健康状态；保持该服务运行到检索结束：
 
 ```bash
 cd ~/Documents/rag-reranker
 node server.mjs
+```
+
+```bash
 curl http://127.0.0.1:11435/health
 ```
 
@@ -120,9 +123,18 @@ node scripts/rag/create_retrieval_workspace.mjs \
   --rerank-threshold 0.9
 ```
 
+- rerank 服务地址、模型和超时可通过 `--rerank-url`、`--rerank-model`、`--rerank-timeout-ms` 或环境变量 `RAG_RERANK_URL`、`RAG_RERANK_MODEL`、`RAG_RERANK_TIMEOUT_MS` 覆盖。`--rerank-recall-width` 必须大于等于本次 `topK`，`--rerank-threshold` 必须在 `[0, 1]` 内。
 - 默认 rerank 范围只覆盖景点 `highlights`、`nearby`、`facilities` 和城市 `backup_places`。调参时可用 `--rerank-theme <theme>` 扩展白名单，或用 `--rerank-all-themes` 覆盖全部 theme。
 - 启用 rerank 后，`retrieval-workspace.json` 仍是轻量阅读索引，不写入 rerank 概率、软降权乘子或最终内部排序分。需要查看概率、过滤原因和耗时时，追加 `--log <工作目录>/retrieval-log.json`。
 - 如果 rerank URL 是 `localhost`、`127.0.0.1` 或 `::1`，运行环境需要能访问用户宿主机 loopback 端口；在受限环境中直接请求相应权限，不用先让命令失败。
+- 显式启用 `--rerank` 后，rerank API 不可用、超时或返回非法结果时流程应报错停止，不静默降级为无 rerank。只有用户同意降级时，才移除 `--rerank` 重新生成。
+
+Rerank 诊断与调参：
+
+- rerank 概率只作为主题相关性闸门，不作为同主题 top-N 精排事实依据。`retrieval-workspace.json` 中的 `score` 仍是常规相关性分，agent 不得把 rerank 概率写入 facts。
+- rerank 阈值过滤后，某个 theme 可以少于 `topK` 条，甚至为空。theme 为空不自动等同于“材料没有这类信息”；涉及关键执行字段时，先用 `--log` 生成诊断，再看 `requests[].rerank.items[]` 的概率分布、`passed_threshold`、`out_of_window_count`。需要核对候选正文时，用 `scripts/rag/rag_retrieve.mjs` 对同一 target/theme 做不带 `--rerank` 的单点补检索，不直接打开 `rag-index.json`。
+- 调参按固定顺序一次只动一个变量：先看概率分布并调整 `--rerank-threshold`；只有 `out_of_window_count > 0` 且窗口末位概率仍高于阈值时，才扩大 `--rerank-recall-width`；只有窗口内内容确实相关但整体低分时，才考虑修改 `RAG_RERANK_DEFAULTS.queryTemplates`。
+- 非白名单 theme 正常记录为 `skipped_reason: "theme_not_in_scope"`，不会调用 rerank 服务。不要把这种跳过当成服务失败。
 
 ## Step 5：填充第一版 Facts Workspace
 
