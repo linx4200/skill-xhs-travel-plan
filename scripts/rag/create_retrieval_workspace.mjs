@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRagIndex, retrieve, writeRetrievalLog } from "./rag_retrieve.mjs";
+import { rerankThemeScope, resolveRerankConfig } from "./rag_rerank.mjs";
 import { CITY_THEMES, PLACE_THEMES, RAG_SCORING, RAG_RETRIEVAL_DEFAULTS } from "./rag_retrieval_config.mjs";
 
 /**
@@ -21,6 +22,14 @@ function parseArgs(argv) {
     embeddingModel: "",
     noEmbedding: false,
     log: "",
+    rerank: false,
+    rerankUrl: "",
+    rerankModel: "",
+    rerankAllThemes: false,
+    rerankThemes: [],
+    rerankRecallWidth: undefined,
+    rerankThreshold: undefined,
+    rerankTimeoutMs: undefined,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -35,6 +44,14 @@ function parseArgs(argv) {
     else if (arg === "--embedding-url") args.embeddingUrl = argv[++i];
     else if (arg === "--embedding-model") args.embeddingModel = argv[++i];
     else if (arg === "--no-embedding") args.noEmbedding = true;
+    else if (arg === "--rerank") args.rerank = true;
+    else if (arg === "--rerank-url") args.rerankUrl = argv[++i];
+    else if (arg === "--rerank-model") args.rerankModel = argv[++i];
+    else if (arg === "--rerank-all-themes") args.rerankAllThemes = true;
+    else if (arg === "--rerank-theme") args.rerankThemes.push(argv[++i]);
+    else if (arg === "--rerank-recall-width") args.rerankRecallWidth = rerankNumberArg(argv[++i], arg);
+    else if (arg === "--rerank-threshold") args.rerankThreshold = rerankNumberArg(argv[++i], arg);
+    else if (arg === "--rerank-timeout-ms") args.rerankTimeoutMs = rerankNumberArg(argv[++i], arg);
     else if (arg === "--log") args.log = argv[++i];
     else throw new Error(`Unexpected argument: ${arg}`);
   }
@@ -50,6 +67,38 @@ function parseArgs(argv) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number.`);
   }
   return args;
+}
+
+/**
+ * 解析 rerank 数值参数。范围校验由 rag_rerank.mjs 统一执行。
+ */
+function rerankNumberArg(value, flag) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`${flag} must be a number.`);
+  return parsed;
+}
+
+/**
+ * 把批量脚本参数整理成 retrieve() 的 rerank 配置。
+ *
+ * 必须逐字段映射，不能展开整个 args/options：批量脚本里的 themes 若被传进
+ * resolveRerankConfig()，会被解释成 rerank 额外白名单。
+ */
+function rerankOptionsFromOptions(options = {}) {
+  const direct = {
+    enabled: options.rerank === true,
+    url: options.rerankUrl,
+    model: options.rerankModel,
+    allThemes: options.rerankAllThemes,
+    themes: options.rerankThemes,
+    recallWidth: options.rerankRecallWidth,
+    probThreshold: options.rerankThreshold,
+    timeoutMs: options.rerankTimeoutMs,
+    maxDocChars: options.rerankMaxDocChars,
+    reranker: options.reranker,
+    httpClient: options.httpClient,
+  };
+  return options.rerank && typeof options.rerank === "object" ? { ...direct, ...options.rerank } : direct;
 }
 
 /**
@@ -203,6 +252,7 @@ async function collectThemeResults(index, entityType, name, themes, maxThemeChun
       embeddingModel: options.embeddingModel,
       noEmbedding: options.noEmbedding,
       includeDiagnostics: Boolean(options.logRequests),
+      rerank: options.rerank,
     });
     if (options.logRequests && result.diagnostics) {
       options.logRequests.push({
@@ -233,6 +283,23 @@ async function collectThemeResults(index, entityType, name, themes, maxThemeChun
     unique_chunk_ids: selectedIds,
     selected_results: selectedIds.map((id) => selectedById.get(id)).filter(Boolean),
     dropped_by_theme: droppedByTheme,
+  };
+}
+
+/**
+ * 生成对外发布的 rerank 评分元信息。这里只描述配置和解释边界，不写入任何单条概率。
+ */
+function rerankScoringMetadata(rerankOptions = {}) {
+  const resolved = resolveRerankConfig(rerankOptions);
+  return {
+    enabled: resolved.enabled,
+    url: resolved.url,
+    model_id: resolved.model || null,
+    recall_width: resolved.recallWidth,
+    probability_threshold: resolved.probThreshold,
+    theme_scope: rerankThemeScope(resolved),
+    threshold_filtering: true,
+    business_rules_preserved: true,
   };
 }
 
@@ -314,6 +381,9 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
   const maxCityChunks = Number(options.maxCityChunks ?? RAG_RETRIEVAL_DEFAULTS.maxCityChunks);
   const hasChunkEmbeddings = asList(index.chunks).some((chunk) => asList(chunk.embedding).length > 0);
   const usesEmbedding = hasChunkEmbeddings && !options.noEmbedding;
+  const rerankOptions = rerankOptionsFromOptions(options);
+  const rerankMetadata = rerankScoringMetadata(rerankOptions);
+  const scoringStrategy = usesEmbedding ? "candidate_gated_embedding_keyword_entity_title" : "candidate_gated_keyword_entity_title";
 
   const chunksById = {};
   const places = {};
@@ -325,7 +395,7 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
       PLACE_THEMES,
       placeMaxThemeChunks,
       maxPlaceChunks,
-      options,
+      { ...options, rerank: rerankOptions },
     );
     for (const result of selected_results) chunksById[result.chunk_id] ??= chunkRecord(result);
     places[place] = {
@@ -346,7 +416,7 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
       CITY_THEMES,
       cityMaxThemeChunks,
       maxCityChunks,
-      options,
+      { ...options, rerank: rerankOptions },
     );
     for (const result of selected_results) chunksById[result.chunk_id] ??= chunkRecord(result);
     cities[city] = {
@@ -383,7 +453,7 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
       max_place_chunks: maxPlaceChunks,
       max_city_chunks: maxCityChunks,
       scoring: {
-        strategy: usesEmbedding ? "candidate_gated_embedding_keyword_entity_title" : "candidate_gated_keyword_entity_title",
+        strategy: `${scoringStrategy}${rerankMetadata.enabled ? "_rerank" : ""}`,
         weights: usesEmbedding
           ? {
               entity_query: {
@@ -417,6 +487,7 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
             by_theme: { ...RAG_SCORING.cityTiltByTheme },
           },
         },
+        rerank: rerankMetadata,
       },
     },
     chunks_by_id: chunksById,
@@ -448,7 +519,21 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const logRequests = [];
   const options = {
-    ...args,
+    placeTopK: args.placeTopK,
+    cityTopK: args.cityTopK,
+    maxPlaceChunks: args.maxPlaceChunks,
+    maxCityChunks: args.maxCityChunks,
+    embeddingUrl: args.embeddingUrl,
+    embeddingModel: args.embeddingModel,
+    noEmbedding: args.noEmbedding,
+    rerank: args.rerank,
+    rerankUrl: args.rerankUrl,
+    rerankModel: args.rerankModel,
+    rerankAllThemes: args.rerankAllThemes,
+    rerankThemes: args.rerankThemes,
+    rerankRecallWidth: args.rerankRecallWidth,
+    rerankThreshold: args.rerankThreshold,
+    rerankTimeoutMs: args.rerankTimeoutMs,
     logRequests: args.log ? logRequests : null,
   };
   const workspace = await createRetrievalWorkspace(args.facts, args.ragIndex, options);
