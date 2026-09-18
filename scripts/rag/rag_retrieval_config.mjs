@@ -103,6 +103,12 @@ export const RAG_RERANK_DEFAULTS = {
   model: "onnx-community/Qwen3-Reranker-0.6B-ONNX",
   recallWidth: 12,
   probThreshold: 0.9,
+  probThresholdByTheme: {
+    place: {
+      facilities: 0.70,
+    },
+    city: {},
+  },
 
   // 单条 rerank document 的正文截断上限，只用于防止异常长文本拖慢推理。
   maxDocChars: 700,
@@ -112,7 +118,8 @@ export const RAG_RERANK_DEFAULTS = {
     place: {
       highlights: "{name}有哪些值得专门停留、拍照或体验的景观亮点和游玩看点？",
       nearby: "{name}周边有哪些顺路、附近或可组合游玩的地点和路线建议？",
-      facilities: "{name}游玩有什么厕所、停车、吃饭、住宿、骑马等实用配套信息？",
+      facilities:
+        "{name}游玩材料是否提到任一实用配套信息，例如厕所/卫生间、停车/接驳/观光车、游客中心、吃饭住宿、补给/小卖部、休息区、寄存或充电？",
     },
     city: {
       backup_places: "{name}有哪些可作为行程备选、顺路补充或城市周边的小众地点？",

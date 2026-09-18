@@ -194,6 +194,7 @@ test("阅读池名额足够时不会丢弃任何 chunk", async () => {
     model_id: RAG_RERANK_DEFAULTS.model,
     recall_width: RAG_RERANK_DEFAULTS.recallWidth,
     probability_threshold: RAG_RERANK_DEFAULTS.probThreshold,
+    probability_threshold_by_theme: RAG_RERANK_DEFAULTS.probThresholdByTheme,
     theme_scope: {
       place: RAG_RERANK_DEFAULTS.highRiskThemes.place,
       city: RAG_RERANK_DEFAULTS.highRiskThemes.city,
@@ -299,6 +300,7 @@ test("rerank options are passed through and metadata is published without leakin
   assert.equal(workspace.retrieval.scoring.rerank.model_id, "test-reranker");
   assert.equal(workspace.retrieval.scoring.rerank.recall_width, 2);
   assert.equal(workspace.retrieval.scoring.rerank.probability_threshold, 0.9);
+  assert.deepEqual(workspace.retrieval.scoring.rerank.probability_threshold_by_theme, RAG_RERANK_DEFAULTS.probThresholdByTheme);
   assert.deepEqual(workspace.retrieval.scoring.rerank.theme_scope, {
     place: [...RAG_RERANK_DEFAULTS.highRiskThemes.place, "tickets"],
     city: [...RAG_RERANK_DEFAULTS.highRiskThemes.city, "tickets"],

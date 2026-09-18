@@ -48,6 +48,18 @@ function uniqueStrings(values) {
   return result;
 }
 
+function mergeThresholdOverrides(defaults = {}, overrides = {}) {
+  return {
+    place: { ...(defaults.place ?? {}), ...(overrides.place ?? {}) },
+    city: { ...(defaults.city ?? {}), ...(overrides.city ?? {}) },
+  };
+}
+
+function thresholdForTheme(config, entityType, theme) {
+  const override = config.probThresholdByTheme?.[entityType]?.[theme];
+  return Number(override ?? config.probThreshold);
+}
+
 /**
  * 通用辅助：返回第一个有效配置值。只跳过 undefined / null / 空串，
  * 因此显式传入的 `false`、`0` 不会被默认值覆盖。
@@ -82,6 +94,7 @@ export function resolveRerankConfig(overrides = {}, env = process.env) {
   const defaults = RAG_RERANK_DEFAULTS;
   const templateOverride = source.queryTemplates ?? {};
   const highRiskOverride = source.highRiskThemes ?? {};
+  const thresholdOverride = source.probThresholdByTheme ?? source.rerankThresholdByTheme ?? {};
 
   return {
     enabled: Boolean(pick(source.enabled, defaults.enabled)),
@@ -89,6 +102,7 @@ export function resolveRerankConfig(overrides = {}, env = process.env) {
     model: String(pick(source.model, source.rerankModel, env.RAG_RERANK_MODEL, defaults.model) ?? ""),
     recallWidth: Number(pick(source.recallWidth, source.rerankRecallWidth, defaults.recallWidth)),
     probThreshold: Number(pick(source.probThreshold, source.rerankThreshold, defaults.probThreshold)),
+    probThresholdByTheme: mergeThresholdOverrides(defaults.probThresholdByTheme, thresholdOverride),
     timeoutMs: Number(pick(source.timeoutMs, source.rerankTimeoutMs, env.RAG_RERANK_TIMEOUT_MS, defaults.timeoutMs)),
     maxDocChars: Number(pick(source.maxDocChars, defaults.maxDocChars)),
     allThemes: Boolean(pick(source.allThemes, source.rerankAllThemes, false)),
@@ -200,6 +214,14 @@ function validateRerankOptions(config, topK) {
   }
   if (!Number.isFinite(config.probThreshold) || config.probThreshold < 0 || config.probThreshold > 1) {
     throw new Error("--rerank-threshold must be within [0, 1].");
+  }
+  for (const [entityType, thresholds] of Object.entries(config.probThresholdByTheme ?? {})) {
+    for (const [theme, threshold] of Object.entries(thresholds ?? {})) {
+      const value = Number(threshold);
+      if (!Number.isFinite(value) || value < 0 || value > 1) {
+        throw new Error(`Rerank threshold for ${entityType}/${theme} must be within [0, 1].`);
+      }
+    }
   }
   if (!Number.isFinite(config.timeoutMs) || config.timeoutMs <= 0) {
     throw new Error("--rerank-timeout-ms must be a positive number.");
@@ -400,6 +422,7 @@ export async function rerankRows(rows, request = {}, config = {}) {
   const entityType = entity?.type ?? null;
   const theme = String(request.theme ?? "");
   const topK = Number.isFinite(Number(request.topK)) ? Number(request.topK) : null;
+  const probabilityThreshold = thresholdForTheme(resolved, entityType, theme);
 
   // 先构造完整诊断骨架，每个退出分支都复用同一套字段，避免下游判空。
   const diagnostics = {
@@ -410,7 +433,7 @@ export async function rerankRows(rows, request = {}, config = {}) {
     model_id: resolved.model || null,
     rerank_query: null,
     recall_width: resolved.recallWidth,
-    probability_threshold: resolved.probThreshold,
+    probability_threshold: probabilityThreshold,
     input_count: 0,
     kept_count: 0,
     filtered_count: 0,
@@ -462,7 +485,7 @@ export async function rerankRows(rows, request = {}, config = {}) {
     const probability = probabilities.get(document.id);
     const tier = tierOf(row);
     const penaltyMultiplier = penaltyMultiplierOf(row);
-    const passedThreshold = probability >= resolved.probThreshold;
+    const passedThreshold = probability >= probabilityThreshold;
     return {
       row,
       passedThreshold,
