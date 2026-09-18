@@ -118,6 +118,7 @@ export const RAG_RERANK_DEFAULTS = {
     place: {
       highlights: "{name}有哪些值得专门停留、拍照或体验的景观亮点和游玩看点？",
       nearby: "{name}周边有哪些顺路、附近或可组合游玩的地点和路线建议？",
+      routes: "{name}游玩材料是否提供具体游览路线、先后顺序、环线、徒步、游船、观光车或索道等动线玩法安排？",
       facilities:
         "{name}游玩材料是否提到任一实用配套信息，例如厕所/卫生间、停车/接驳/观光车、游客中心、吃饭住宿、补给/小卖部、休息区、寄存或充电？",
     },
@@ -126,7 +127,7 @@ export const RAG_RERANK_DEFAULTS = {
     },
   },
   highRiskThemes: {
-    place: ["highlights", "nearby", "facilities"],
+    place: ["highlights", "nearby", "routes", "facilities"],
     city: ["backup_places"],
   },
 };
