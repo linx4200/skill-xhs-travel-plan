@@ -74,7 +74,7 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 - `retrieval_health.hard_gap_reasons`：明确无法依赖 RAG 的原因，例如完全没有召回。
 - `retrieval_quota.max_chunks`、`selected_chunks`：该 target 的阅读池上限与实际入池数量。
 - `retrieval_quota.dropped_total`、`dropped_by_theme`：被阅读池名额丢弃的 chunk 数量，按主题归集。这些 chunk 确实被对应主题命中，但既不在 `unique_chunk_ids` 里，也不在 `themes.<theme>[]` 索引里。默认参数下为 0 和 `{}`。当该值大于 0 时，agent 不得直接判断对应字段没有素材；字段缺口或高风险事项需要用单点检索定向复核。
-- `themes.<theme>[]`：字段优先阅读索引；每项只包含 `chunk_id`、`score` 和 `matched_by`。agent 填写与该 theme 对应的字段时，优先按这里的 `chunk_id` 到 `chunks_by_id` 读取原文。
+- `themes.<theme>[]`：字段优先阅读索引；每项固定包含 `chunk_id`、`score` 和 `matched_by`。当条目需要解释业务排序时，可额外包含 `place_specific: true` 或 `tier: 1`。agent 填写与该 theme 对应的字段时，优先按这里的 `chunk_id` 到 `chunks_by_id` 读取原文。
 
 阅读池名额按主题顺序先到先得：各主题按 `themes` 的 key 顺序依次入池，池满后新 chunk 一律丢弃（记录到 `retrieval_quota`），已入池的 chunk 仍会登记进后序主题的索引。默认参数下 place 为 10 个主题 × 每个主题 5 条 = 50、city 为 5 × 5 = 25，恰好等于 `max_place_chunks` / `max_city_chunks`，因此默认不产生丢弃；调大 `--place-top-k` / `--city-top-k` 或新增主题后才会触发，且总是从主题顺序末尾开始。
 
@@ -87,14 +87,14 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 检索排序约束：
 
 - 带 `place` 的检索只召回 `candidate_places` 命中目标地点的 chunk。
-- 带 `city` 的检索只召回 `candidate_cities` 命中目标城市的 chunk，并对同时绑定 `candidate_places` 的地点级 chunk 施加 theme-sensitive 软惩罚。
-- 若 chunks 含 embedding，则 query embedding 相似度参与主题候选池内排序；标题/正文关键词、实体、标题来源分和来源 penalty 保留为可解释排序信号。
+- 带 `city` 的检索只召回 `candidate_cities` 命中目标城市的 chunk。`backup_places` 中同时绑定 `candidate_places` 的地点级 chunk 进入低优先档；其他 city theme 中的地点级 chunk 只做软降权。
+- 若 chunks 含 embedding，则 query embedding 相似度参与主题候选池内排序；标题/正文关键词、实体、标题来源分组成纯相关性分。视频来源和城市地点级业务规则不进入 `score.breakdown`，而由 `business` / `retrieval.scoring.business_rules` 表达。
 
 Agent 填 facts 时按字段优先读取 `themes.<theme>[]` 的 chunk_id，再到顶层 `chunks_by_id` 读取原文；`unique_chunk_ids` 只在 theme 为空、信息不足、冲突、综合判断或高风险复核时作为兜底。若已读 chunk 中出现本次行程城市或地点的海拔数值，必须写入对应 facts 目标的 `elevation_m`。不要把 `text`、`score`、`matched_by` 或大段 evidence 写入最终 `facts-workspace.json`。
 
 ## retrieval-log.json
 
-`retrieval-log.json` 是用户明确要求时才生成的可选调试产物，由 `scripts/rag/rag_retrieve.mjs --log` 或 `scripts/rag/create_retrieval_workspace.mjs --log` 生成。默认 RAG 流程不得创建该文件。它解释每个 chunk 如何被召回、是否被过滤、向量相似度如何参与排序，以及总分如何由各分项贡献组成。该文件面向调试和调参，不作为 facts 填充的事实来源。
+`retrieval-log.json` 是用户明确要求时才生成的可选调试产物，由 `scripts/rag/rag_retrieve.mjs --log` 或 `scripts/rag/create_retrieval_workspace.mjs --log` 生成。默认 RAG 流程不得创建该文件。它解释每个 chunk 如何被召回、是否被过滤、向量相似度如何参与相关性分、业务状态如何影响排序，以及 rerank 是否执行。该文件面向调试和调参，不作为 facts 填充的事实来源。
 
 顶层字段：
 
@@ -113,17 +113,19 @@ Agent 填 facts 时按字段优先读取 `themes.<theme>[]` 的 chunk_id，再�
 - `top_k`：本次检索最多返回多少条 chunk。
 - `index_chunk_count`：索引总 chunk 数。
 - `query_embedding.used`、`query_embedding.dimensions`：是否生成 query embedding 以及向量维度。
+- `rerank`：rerank 诊断块；未启用或未命中范围时记录跳过原因，启用时记录 query、阈值、概率、`tier`、软降权乘子和最终 rerank 排序分。
 - `chunks[]`：该请求下每个 chunk 的评估日志。
 
 `requests[].chunks[]` 字段：
 
 - `chunk_id`、`source_uri`、`title`
 - `gate.passed`、`gate.reason`
-- `recall_status`：`selected`、`scored_not_selected`、`zero_score` 或 `filtered_by_entity_gate`
+- `recall_status`：`selected`、`reranked_filtered`、`scored_not_selected`、`zero_score` 或 `filtered_by_entity_gate`
 - `candidate_rank`、`selected_rank`
 - `matched_by`
 - `vector_match.used`、`query_dimensions`、`chunk_dimensions`、`chunk_has_embedding`、`cosine_similarity`
 - `score.profile`、`weights`、`signals`、`contributions`、`total`
+- `business.tier`、`tilt_multiplier`、`is_video`、`place_specific`
 - `candidate_places`、`candidate_cities`
 
 日志不复制完整 embedding 数组。

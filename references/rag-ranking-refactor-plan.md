@@ -6,7 +6,7 @@
 > - `references/rag-rerank-technical-design.md`（rerank 技术方案）
 > - `references/rag-rerank-execution-plan.md`（rerank 执行方案；本方案落地后需在其中阶段 6/8 回写）
 >
-> 状态：**已确认，待执行**（2026-09-18 拍板；第 7 节 5 项决策已锁定，分阶段执行见第 6 节）
+> 状态：**已执行 R1-R4**（2026-09-18 拍板；第 7 节 5 项决策已锁定，分阶段执行见第 6 节）
 
 ---
 

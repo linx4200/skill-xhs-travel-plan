@@ -173,7 +173,7 @@ rerank 换进来的是真正讲机位与景观的：`020-dashanbao-note.md#1`（
 另有两条设计约束必须遵守：
 
 1. **不能用 rerank 分数精排 top-5 内部顺序**（见 4.2）。建议改用 **prob 阈值过滤**：某 theme 只有 3 条过阈值就只给 3 条，比凑 5 条塞进无关内容好。
-2. **现有两条 penalty 是业务硬规则，不能被 rerank 冲掉**。`video_source_penalty`（视频来源降权）和 `city_place_specific_penalty`（城市检索里地点级 chunk 降权）不是相关性判断，是业务约束。若 rerank 分数直接替换原排序，这两条会失效——必须 rerank 后单独乘回 penalty，或重排只在无 penalty 的候选内部做。
+2. **业务状态不能被 rerank 冲掉**。主流程用 `scored.business.tier` 表达不可翻越档位，用 `scored.business.tilt_multiplier` 表达可翻越软降权。rerank 只消费这两个业务状态：先按 `tier` 分层，再按 `probability × tilt_multiplier` 排序。
 
 ### 位置 A 的边界：修不掉阅读池名额分配
 
