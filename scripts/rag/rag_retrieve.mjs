@@ -17,7 +17,9 @@
  *    5.3 根据是否有 query 向量、是否有实体目标和城市主题选择评分权重，并计算综合总分。
  *    5.4 过滤掉未通过 gate 或总分为 0 的 chunk，得到候选结果。
  *    5.5 城市检索把地点级 chunk 作为软 penalty 纳入总分；排序主要看总分，同分时偏向城市级 chunk。
- *    5.6 按 topK 截断，生成最终返回的 results。
+ *    5.6 可选 rerank：显式启用时，对高风险 theme 的候选窗口调用本地 rerank 服务重排并做相关性过滤。
+ *        rerank 由 rag_rerank.mjs 实现，默认关闭；未启用时排序和截断行为与接入前一致。
+ *    5.7 按 topK 截断，生成最终返回的 results。rerank 允许某个 theme 少于 topK 条结果。
  * 6. 按参数输出 JSON 或终端短预览；如指定 `--log`，额外写出可解释的召回与评分诊断日志。
  */
 
@@ -25,6 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { placeAliases, relatedPlaceName } from "../place_name_utils.mjs";
+import { rerankRows } from "./rag_rerank.mjs";
 import {
   CITY_PLACE_SPECIFIC_PENALTY_BY_THEME,
   CITY_THEMES,
@@ -35,10 +38,22 @@ import {
 
 export { CITY_THEMES, PLACE_THEMES };
 
+/** 视频来源 chunk 的负权重，主流程评分和业务 penalty 折算共用同一个来源。 */
 const VIDEO_CHUNK_PENALTY_WEIGHT = -0.15;
 
 /**
+ * 业务 penalty multiplier 的下限，避免多个负向 penalty 叠加后把最终分压成 0 或负数。
+ *
+ * 注意上限 1：`Math.min(1, …)` 只对「降权」语义成立。当前两条 penalty 都是负向，没有问题；
+ * 将来若要加入正向修正信号（例如官方来源加权），这里的上限会把它切掉，届时要一并调整。
+ */
+const MIN_BUSINESS_PENALTY_MULTIPLIER = 0.01;
+
+/**
  * 流程 1：解析单点检索命令参数。`--theme` 可重复传入；未传时只按实体或 query 检索。
+ *
+ * rerank 相关参数默认关闭且保持空值：空值表示「未显式指定」，由 rag_rerank.mjs 依次回退到
+ * 环境变量和 RAG_RERANK_DEFAULTS，避免 CLI 默认值遮住环境变量。
  */
 function parseArgs(argv) {
   const args = {
@@ -53,6 +68,14 @@ function parseArgs(argv) {
     noEmbedding: false,
     log: "",
     json: false,
+    rerank: false,
+    rerankUrl: "",
+    rerankModel: "",
+    rerankAllThemes: false,
+    rerankThemes: [],
+    rerankRecallWidth: undefined,
+    rerankThreshold: undefined,
+    rerankTimeoutMs: undefined,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -66,6 +89,14 @@ function parseArgs(argv) {
     else if (arg === "--embedding-url") args.embeddingUrl = argv[++i];
     else if (arg === "--embedding-model") args.embeddingModel = argv[++i];
     else if (arg === "--no-embedding") args.noEmbedding = true;
+    else if (arg === "--rerank") args.rerank = true;
+    else if (arg === "--rerank-url") args.rerankUrl = argv[++i];
+    else if (arg === "--rerank-model") args.rerankModel = argv[++i];
+    else if (arg === "--rerank-all-themes") args.rerankAllThemes = true;
+    else if (arg === "--rerank-theme") args.rerankThemes.push(argv[++i]);
+    else if (arg === "--rerank-recall-width") args.rerankRecallWidth = rerankNumberArg(argv[++i], arg);
+    else if (arg === "--rerank-threshold") args.rerankThreshold = rerankNumberArg(argv[++i], arg);
+    else if (arg === "--rerank-timeout-ms") args.rerankTimeoutMs = rerankNumberArg(argv[++i], arg);
     else if (arg === "--log") args.log = argv[++i];
     else if (arg === "--json") args.json = true;
     else throw new Error(`Unexpected argument: ${arg}`);
@@ -78,6 +109,37 @@ function parseArgs(argv) {
   if (args.place && args.city) throw new Error("Use either --place or --city for entity retrieval, not both.");
   if (!Number.isFinite(args.topK) || args.topK <= 0) throw new Error("--top-k must be a positive number.");
   return args;
+}
+
+/**
+ * 流程 1：解析 rerank 数值参数。
+ *
+ * 只负责「能不能解析成有限数字」：未传时字段保持 undefined，交给 RAG_RERANK_DEFAULTS；
+ * 传了但无法解析时立即报错，避免静默退回默认值让人误以为参数已生效。取值范围校验
+ * （recall-width > 0、threshold ∈ [0, 1]）由 rag_rerank.mjs 的启动校验统一负责，此处不重复实现。
+ */
+function rerankNumberArg(value, flag) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`${flag} must be a number.`);
+  return parsed;
+}
+
+/**
+ * 流程 1：把 CLI 参数整理成 rag_rerank.mjs 的 rerank 配置。
+ *
+ * 空字符串和 undefined 会在配置合并时被跳过，因此这里不做默认值填充。
+ */
+function rerankOptionsFromArgs(args) {
+  return {
+    enabled: args.rerank,
+    url: args.rerankUrl,
+    model: args.rerankModel,
+    allThemes: args.rerankAllThemes,
+    themes: args.rerankThemes,
+    recallWidth: args.rerankRecallWidth,
+    probThreshold: args.rerankThreshold,
+    timeoutMs: args.rerankTimeoutMs,
+  };
 }
 
 /**
@@ -506,6 +568,24 @@ function scoreBreakdown(signals, scoring) {
 }
 
 /**
+ * 流程 5.3：把业务 penalty 信号折算成乘性系数。
+ *
+ * businessPenalty = 1
+ *   + video_source_penalty_signal * video_source_penalty_weight
+ *   + city_place_specific_penalty_signal * city_place_specific_penalty_weight
+ *
+ * 主流程排序仍走加性 `score`（`scoreBreakdown()` 的 `total`），本函数只服务于
+ * 「量纲不同、必须乘」的下游场景（当前唯一消费者是 rerank 的 `final_rerank_score`）。
+ * 折算规则定义在主流程，避免业务规则新增时旁支漏改。
+ */
+function businessPenaltyMultiplier(signals, weights) {
+  const videoPenalty = Number(signals.video_source_penalty ?? 0) * Number(weights.video_source_penalty ?? 0);
+  const cityPenalty =
+    Number(signals.city_place_specific_penalty ?? 0) * Number(weights.city_place_specific_penalty ?? 0);
+  return Math.min(1, Math.max(MIN_BUSINESS_PENALTY_MULTIPLIER, 1 + videoPenalty + cityPenalty));
+}
+
+/**
  * 流程 5.6：输出面向 agent 阅读的检索结果；不暴露内部派生字段。
  */
 function resultForChunk(chunk, score, matches) {
@@ -535,6 +615,9 @@ function resultForChunk(chunk, score, matches) {
  * 2. 再根据是否有 queryVector、是否有实体目标和城市 theme 选择权重 profile。
  * 3. 总分 = 每个信号分 * 对应权重后求和，并通过 scoreBreakdown 保留 contributions 供日志解释。
  * 4. matched_by 只记录参与召回/排序的命中信号；embedding 相似度大于 0 时额外标记 embedding。
+ * 5. 另输出 `businessPenaltyMultiplier`，与 score/matches/breakdown 平级；它是同一份 signals 和
+ *    weights 的乘性折算，**只供 rerank 消费**，不参与主流程排序，也不进 breakdown（breakdown 的
+ *    契约是「每个信号 × 权重 = 贡献」，插入非贡献值会破坏它的可加性）。
  */
 function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
   // 计算 keyword_match：主题词、自由 query 词和实体别名在标题、正文中的命中比例。
@@ -564,10 +647,13 @@ function scoreChunk(chunk, entity, aliases, terms, queryVector, theme) {
   const matches = matchedBy(chunk, entity, aliases, terms);
   // embedding 相似度只要大于 0，就把 embedding 也记录为命中信号。
   if (embedding > 0) matches.push("embedding");
+  // 用同一份 signals 和 weights 折算业务 penalty 系数，供 rerank 乘性消费（不参与总分）。
+  const penaltyMultiplier = businessPenaltyMultiplier(signals, breakdown.weights);
   return {
     score: breakdown.total,
     matches,
     breakdown,
+    businessPenaltyMultiplier: penaltyMultiplier,
   };
 }
 
@@ -673,11 +759,18 @@ function vectorTrace(queryVector, chunk, similarity) {
 
 /**
  * 流程 6：为单个 chunk 生成调试日志项。
+ *
+ * `recall_status` 在接入 rerank 后多一种取值：`reranked_filtered` 表示该 chunk 进入了 rerank
+ * 窗口但概率低于阈值被过滤，用来和「综合分不够」的 `scored_not_selected` 区分开。
+ *
+ * `candidate_rank` 始终是 rerank 前的综合分名次；`selected_rank` 按最终输出顺序计算，
+ * 因此启用 rerank 后两者不一致是正常现象。
  */
-function diagnosticForRow(row, selectedIds, eligibleRanks) {
+function diagnosticForRow(row, selectedIds, eligibleRanks, rerankedFilteredIds = new Set()) {
   let recallStatus = "filtered_by_entity_gate";
   if (row.gate.passed && row.result.score <= 0) recallStatus = "zero_score";
   else if (selectedIds.has(row.chunk.chunk_id)) recallStatus = "selected";
+  else if (rerankedFilteredIds.has(row.chunk.chunk_id)) recallStatus = "reranked_filtered";
   else if (row.gate.passed) recallStatus = "scored_not_selected";
 
   return {
@@ -698,10 +791,32 @@ function diagnosticForRow(row, selectedIds, eligibleRanks) {
 
 /**
  * 流程 6：生成单次 retrieve() 的完整调试日志。
+ *
+ * `rerank` 是 rag_rerank.mjs 的诊断块：未启用时记录 enabled/applied/skipped_reason，
+ * 启用时额外记录 rerank query、概率、阈值判定和业务 penalty。只有 includeDiagnostics 为 true
+ * 时才会出现在输出里，普通检索结果不含任何 rerank 明细。
  */
-function retrievalDiagnostics({ index, query, entity, theme, aliases, terms, queryVector, topK, rows, selectedRows, rankedRows }) {
+function retrievalDiagnostics({
+  index,
+  query,
+  entity,
+  theme,
+  aliases,
+  terms,
+  queryVector,
+  topK,
+  rows,
+  selectedRows,
+  rankedRows,
+  rerank,
+}) {
   const selectedIds = new Set(selectedRows.map((row) => row.chunk.chunk_id));
   const eligibleRanks = new Map(rankedRows.map((row, index) => [row.chunk.chunk_id, index + 1]));
+  const rerankedFilteredIds = new Set(
+    asList(rerank?.items)
+      .filter((item) => item.passed_threshold === false)
+      .map((item) => item.chunk_id),
+  );
   return {
     query,
     entity,
@@ -714,7 +829,8 @@ function retrievalDiagnostics({ index, query, entity, theme, aliases, terms, que
       used: queryVector.length > 0,
       dimensions: queryVector.length,
     },
-    chunks: rows.map((row) => diagnosticForRow(row, selectedIds, eligibleRanks)),
+    rerank: rerank ?? null,
+    chunks: rows.map((row) => diagnosticForRow(row, selectedIds, eligibleRanks, rerankedFilteredIds)),
   };
 }
 
@@ -732,6 +848,20 @@ function withoutDiagnostics(result) {
 export function writeRetrievalLog(logPath, payload) {
   fs.mkdirSync(path.dirname(path.resolve(logPath)), { recursive: true });
   fs.writeFileSync(logPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+/**
+ * 流程 5.6：可选 rerank 接入点。
+ *
+ * 位置固定：候选行排序完成之后、截断到 topK 之前。rerank 只重排和过滤候选窗口，
+ * 不改变 entity gate、综合评分和 matched_by，因此 `result.score` 仍是原始综合分。
+ *
+ * 未启用 rerank 时 rag_rerank.rerankRows() 会立刻原样返回 rankedRows，不访问网络，
+ * 同时给出 enabled:false 的诊断块，让 `--log` 能解释「这次为什么没有走 rerank」。
+ * 显式启用时不静默降级：服务不可用、超时或响应非法都会直接抛错。
+ */
+async function maybeRerankRows(rankedRows, request, rerankOptions) {
+  return rerankRows(rankedRows, request, rerankOptions);
 }
 
 /**
@@ -776,7 +906,12 @@ export async function retrieve(indexOrPath, options = {}) {
   const rankedRows = rows
     .filter((row) => row.gate.passed && row.result.score > 0)
     .sort((left, right) => compareResultsForEntity(left.result, right.result, entity));
-  const selectedRows = rankedRows.slice(0, topK);
+  // 流程 5.6：可选 rerank。rerank query 由 rag_rerank.mjs 按固定模板表生成，
+  // 这里只传检索上下文，避免两处维护同一套模板。
+  const reranked = await maybeRerankRows(rankedRows, { query, entity, theme, topK }, options.rerank);
+  // 流程 5.7：截断到 topK。rerank 已过滤掉低于阈值和窗口外的候选，
+  // 因此启用 rerank 时 results 可能少于 topK 条，也不从窗口外补位。
+  const selectedRows = reranked.rows.slice(0, topK);
   const results = selectedRows.map((row) => row.result);
 
   const output = {
@@ -798,6 +933,7 @@ export async function retrieve(indexOrPath, options = {}) {
       rows,
       selectedRows,
       rankedRows,
+      rerank: reranked.diagnostics,
     });
   }
   return output;
@@ -821,6 +957,7 @@ function printText(result) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const themes = args.themes.length ? args.themes : [""];
+  const rerank = rerankOptionsFromArgs(args);
   const requests = [];
   for (const theme of themes) {
     requests.push(
@@ -834,6 +971,7 @@ async function main() {
         embeddingModel: args.embeddingModel,
         noEmbedding: args.noEmbedding,
         includeDiagnostics: Boolean(args.log),
+        rerank,
       }),
     );
   }

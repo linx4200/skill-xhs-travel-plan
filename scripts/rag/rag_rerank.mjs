@@ -6,36 +6,21 @@
  * 2. 判断当前 `entity.type + theme` 是否需要 rerank；不在启用范围内时不访问网络。
  * 3. 取候选窗口前 `recallWidth` 条，按固定模板表生成 rerank query 和 documents。
  * 4. 调用本地 HTTP rerank 服务，并校验响应完整性（缺失结果、重复 id、非法概率都报错）。
- * 5. 按概率阈值过滤，乘回业务 penalty 得到 `final_rerank_score`，再按最终分重排。
+ * 5. 按概率阈值过滤，乘回业务 penalty multiplier 得到 `final_rerank_score`，再按最终分重排。
  *
  * 关键约定：
  * - 不改写 `result.score`。rerank 概率只用于重排、过滤和诊断，原综合分继续对外输出。
  * - 只在显式启用且 theme 在启用范围内时访问网络；未启用时零网络调用。
  * - 窗口外候选不参与补位：阈值过滤后允许某个 theme 返回少于 `topK` 条结果。
  * - 显式启用时不静默降级：服务不可用、超时或响应非法都直接抛错。
+ * - 业务 penalty multiplier 由主流程 `rag_retrieve.mjs` 折算并给出，本模块只消费：
+ *   读 `row.scored.businessPenaltyMultiplier` 相乘，不做信号折算、不持有权重常量。
  *
  * 输入 `rows` 来自 `rag_retrieve.mjs` 的 `rankedRows`，元素结构为
- * `{ chunk, gate, scored, queryVector, result }`。其中 `scored.breakdown.signals`
- * 与 `scored.breakdown.weights` 提供业务 penalty 的原始信号和权重，用于计算
- * penalty multiplier；这样 rerank 后仍保留视频来源降权和城市地点级软惩罚。
+ * `{ chunk, gate, scored, queryVector, result }`。业务 penalty 直接取 `scored.businessPenaltyMultiplier`。
  */
 
-import {
-  CITY_PLACE_SPECIFIC_PENALTY_BY_THEME,
-  DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT,
-  RAG_RERANK_DEFAULTS,
-} from "./rag_retrieval_config.mjs";
-
-/**
- * 视频来源 penalty 的兜底权重，与 `rag_retrieve.mjs` 的评分权重保持一致。
- *
- * 正常路径优先读取 `row.scored.breakdown.weights.video_source_penalty`；
- * 这里只在 row 未携带评分明细（例如人工构造的 fixture）时兜底。
- */
-const VIDEO_CHUNK_PENALTY_WEIGHT = -0.15;
-
-/** penalty multiplier 的下限，避免多个负向 penalty 叠加后把最终分压成 0 或负数。 */
-const MIN_PENALTY_MULTIPLIER = 0.01;
+import { RAG_RERANK_DEFAULTS } from "./rag_retrieval_config.mjs";
 
 /** `skipped_reason` 取值；null 表示本次真正执行了 rerank。 */
 const SKIPPED_DISABLED = "disabled";
@@ -362,27 +347,15 @@ function cityLevelPriority(result, entity) {
 }
 
 /**
- * 计算业务 penalty multiplier。
+ * 读取主流程给出的业务 penalty multiplier。
  *
- * businessPenalty = 1
- *   + video_source_penalty_signal * video_source_penalty_weight
- *   + city_place_specific_penalty_signal * city_place_specific_penalty_weight
- *
- * 权重优先取候选行自身的评分权重，保证 rerank 前后业务约束一致；行上没有评分明细时
- * 城市权重回退到 `CITY_PLACE_SPECIFIC_PENALTY_BY_THEME`，视频权重回退到模块常量。
+ * 折算规则（信号 × 权重、clamp 到 `[0.01, 1]`）定义在 `rag_retrieve.mjs` 的
+ * `businessPenaltyMultiplier()`，本模块只消费结果：拿到就乘，拿不到或不是有限数按 1 处理
+ * （即视作无 penalty），避免 NaN 渗进 `final_rerank_score`。
  */
-function businessPenaltyMultiplier(row, entity, theme) {
-  const signals = row?.scored?.breakdown?.signals ?? {};
-  const weights = row?.scored?.breakdown?.weights ?? {};
-  const cityFallback =
-    entity?.type === "city"
-      ? (CITY_PLACE_SPECIFIC_PENALTY_BY_THEME[theme] ?? DEFAULT_CITY_PLACE_SPECIFIC_PENALTY_WEIGHT)
-      : 0;
-  const videoWeight = weights.video_source_penalty ?? VIDEO_CHUNK_PENALTY_WEIGHT;
-  const cityWeight = weights.city_place_specific_penalty ?? cityFallback;
-  const penalty =
-    1 + Number(signals.video_source_penalty ?? 0) * videoWeight + Number(signals.city_place_specific_penalty ?? 0) * cityWeight;
-  return Math.min(1, Math.max(MIN_PENALTY_MULTIPLIER, penalty));
+function penaltyMultiplierOf(row) {
+  const value = Number(row?.scored?.businessPenaltyMultiplier);
+  return Number.isFinite(value) ? value : 1;
 }
 
 /**
@@ -479,7 +452,7 @@ export async function rerankRows(rows, request = {}, config = {}) {
   const scored = windowRows.map((row, index) => {
     const document = documents[index];
     const probability = probabilities.get(document.id);
-    const penaltyMultiplier = businessPenaltyMultiplier(row, entity, theme);
+    const penaltyMultiplier = penaltyMultiplierOf(row);
     const passedThreshold = probability >= resolved.probThreshold;
     return {
       row,
