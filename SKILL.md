@@ -19,6 +19,8 @@ metadata:
 
 RAG 分支只把 `rag-index.json` 交给项目脚本读取，不走 `resource-index.json`、`reading-queue.json`、`source-digest.json`、`read-log.json` 主路径。默认也不生成 `retrieval-log.json`，除非用户明确要求召回日志、检索日志或召回原因诊断。
 
+用户明确要求开启 rerank，或需要提高 RAG 高风险主题的主题相关性时，仍走 RAG 流程，并按 [references/rag-workflow.md](references/rag-workflow.md) 的可选 rerank 规则处理外部服务、参数、日志和失败边界。
+
 进入 RAG 分支后读取：
 
 - [references/info-rules.md](references/info-rules.md)：路线解析、事实边界、字段取舍和城市页 include 判断。
