@@ -6,18 +6,18 @@
  * 2. 判断当前 `entity.type + theme` 是否需要 rerank；不在启用范围内时不访问网络。
  * 3. 取候选窗口前 `recallWidth` 条，按固定模板表生成 rerank query 和 documents。
  * 4. 调用本地 HTTP rerank 服务，并校验响应完整性（缺失结果、重复 id、非法概率都报错）。
- * 5. 按概率阈值过滤，乘回业务 penalty multiplier 得到 `final_rerank_score`，再按最终分重排。
+ * 5. 按概率阈值过滤，乘回业务软降权 multiplier 得到 `final_rerank_score`，再按最终分重排。
  *
  * 关键约定：
- * - 不改写 `result.score`。rerank 概率只用于重排、过滤和诊断，原综合分继续对外输出。
+ * - 不改写 `result.score`。rerank 概率只用于重排、过滤和诊断，相关性分继续对外输出。
  * - 只在显式启用且 theme 在启用范围内时访问网络；未启用时零网络调用。
  * - 窗口外候选不参与补位：阈值过滤后允许某个 theme 返回少于 `topK` 条结果。
  * - 显式启用时不静默降级：服务不可用、超时或响应非法都直接抛错。
- * - 业务 penalty multiplier 由主流程 `rag_retrieve.mjs` 折算并给出，本模块只消费：
- *   读 `row.scored.businessPenaltyMultiplier` 相乘，不做信号折算、不持有权重常量。
+ * - 业务软降权 multiplier 由主流程 `rag_retrieve.mjs` 折算并给出，本模块只消费：
+ *   优先读 `row.scored.business.tilt_multiplier`，兼容旧字段 `businessPenaltyMultiplier`。
  *
  * 输入 `rows` 来自 `rag_retrieve.mjs` 的 `rankedRows`，元素结构为
- * `{ chunk, gate, scored, queryVector, result }`。业务 penalty 直接取 `scored.businessPenaltyMultiplier`。
+ * `{ chunk, gate, scored, queryVector, result }`。
  */
 
 import { RAG_RERANK_DEFAULTS } from "./rag_retrieval_config.mjs";
@@ -324,7 +324,7 @@ function validateRerankResults(results, documents) {
 }
 
 /**
- * 读取候选行的原始综合分。`result.score` 是检索对外分，标题/来源分等派生字段不参与。
+ * 读取候选行的相关性分。`result.score` 是检索对外分，标题/来源分等派生字段不参与。
  */
 function originalScore(row) {
   const value = Number(row?.result?.score ?? row?.scored?.score ?? 0);
@@ -347,19 +347,18 @@ function cityLevelPriority(result, entity) {
 }
 
 /**
- * 读取主流程给出的业务 penalty multiplier。
+ * 读取主流程给出的业务软降权 multiplier。
  *
- * 折算规则（信号 × 权重、clamp 到 `[0.01, 1]`）定义在 `rag_retrieve.mjs` 的
- * `businessPenaltyMultiplier()`，本模块只消费结果：拿到就乘，拿不到或不是有限数按 1 处理
- * （即视作无 penalty），避免 NaN 渗进 `final_rerank_score`。
+ * 新契约是 `scored.business.tilt_multiplier`；R1 期间保留旧字段兼容，避免外部 fixture
+ * 尚未迁移时把软降权整段丢掉。拿不到或不是有限数按 1 处理，避免 NaN 渗进最终分。
  */
 function penaltyMultiplierOf(row) {
-  const value = Number(row?.scored?.businessPenaltyMultiplier);
+  const value = Number(row?.scored?.business?.tilt_multiplier ?? row?.scored?.businessPenaltyMultiplier);
   return Number.isFinite(value) ? value : 1;
 }
 
 /**
- * rerank 后排序：最终分优先，随后用原始综合分、命中信号数量、城市级优先级和稳定字段兜底。
+ * rerank 后排序：最终分优先，随后用相关性分、命中信号数量、城市级优先级和稳定字段兜底。
  */
 function compareRerankedRows(left, right, entity) {
   return (
@@ -375,7 +374,7 @@ function compareRerankedRows(left, right, entity) {
 /**
  * 对候选 rows 执行 rerank。
  *
- * @param {Array} rows `retrieve()` 内部 rows，未 rerank 前按综合分排序。
+ * @param {Array} rows `retrieve()` 内部 rows，未 rerank 前按召回窗口排序。
  * @param {{ query?: string, rerankQuery?: string, entity?: { type: string, name: string } | null, theme?: string, topK?: number }} request
  * @param {object} config rerank overrides；也接受 `resolveRerankConfig()` 的结果。
  * @returns {Promise<{ rows: Array, diagnostics: object }>}

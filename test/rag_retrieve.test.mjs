@@ -93,7 +93,7 @@ test("query-only retrieval can still use keyword matches without candidate entit
   assert.equal(Object.hasOwn(result.results[0], "keywords"), false);
 });
 
-test("city retrieval softly penalizes place-specific chunks", async () => {
+test("city retrieval records place-specific chunks as soft business tilt", async () => {
   const result = await retrieve(index, { city: "甲城市", theme: "transport", topK: 10, includeDiagnostics: true });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
@@ -101,15 +101,20 @@ test("city retrieval softly penalizes place-specific chunks", async () => {
   );
 
   const placeSpecific = result.diagnostics.chunks.find((item) => item.chunk_id === "a-place-safety");
-  assert.equal(placeSpecific.score.signals.city_place_specific_penalty, 1);
-  assert.equal(placeSpecific.score.contributions.city_place_specific_penalty, -0.12);
+  assert.equal(Object.hasOwn(placeSpecific.score.signals, "city_place_specific_penalty"), false);
+  assert.equal(placeSpecific.business.place_specific, true);
+  assert.equal(placeSpecific.business.tier, 0);
+  assert.equal(placeSpecific.business.tilt_multiplier, 0.9);
+  assert.equal(result.results.find((item) => item.chunk_id === "a-place-safety").place_specific, true);
+  assert.equal(Object.hasOwn(result.results.find((item) => item.chunk_id === "a-place-safety"), "tier"), false);
 
   const cityLevel = result.diagnostics.chunks.find((item) => item.chunk_id === "city-lodging");
-  assert.equal(cityLevel.score.signals.city_place_specific_penalty, 0);
-  assert.equal(cityLevel.score.contributions.city_place_specific_penalty, 0);
+  assert.equal(cityLevel.business.place_specific, false);
+  assert.equal(cityLevel.business.tier, 0);
+  assert.equal(cityLevel.business.tilt_multiplier, 1);
 });
 
-test("city place-specific penalty does not override a clearly stronger score", async () => {
+test("city place-specific soft tilt does not override a clearly stronger score", async () => {
   const cityPenaltyIndex = {
     chunks: [
       {
@@ -142,18 +147,19 @@ test("city place-specific penalty does not override a clearly stronger score", a
   );
 
   const placeStrong = result.diagnostics.chunks.find((item) => item.chunk_id === "place-strong");
-  assert.equal(placeStrong.score.contributions.city_place_specific_penalty, -0.12);
+  assert.equal(placeStrong.business.place_specific, true);
+  assert.equal(placeStrong.business.tilt_multiplier, 0.9);
   assert.equal(placeStrong.score.total > 0.35, true);
 });
 
-test("city place-specific penalty can break a small score advantage", async () => {
+test("city place-specific soft tilt can be overridden by relevance", async () => {
   const cityPenaltyIndex = {
     chunks: [
       {
         chunk_id: "city-focused",
         source_uri: "resources/city-focused.json",
         resource_path: "city-focused.json",
-        title: "甲城市交通",
+        title: "交通提醒",
         text: "停车 自驾。",
         candidate_places: [],
         candidate_cities: ["甲城市"],
@@ -175,14 +181,16 @@ test("city place-specific penalty can break a small score advantage", async () =
   const result = await retrieve(cityPenaltyIndex, { city: "甲城市", theme: "transport", topK: 10, includeDiagnostics: true });
   assert.deepEqual(
     result.results.map((item) => item.chunk_id),
-    ["city-focused", "place-nearby"],
+    ["place-nearby", "city-focused"],
   );
 
   const placeNearby = result.diagnostics.chunks.find((item) => item.chunk_id === "place-nearby");
-  assert.equal(placeNearby.score.contributions.city_place_specific_penalty, -0.12);
+  assert.equal(placeNearby.business.place_specific, true);
+  assert.equal(placeNearby.business.tier, 0);
+  assert.equal(placeNearby.business.tilt_multiplier, 0.9);
 });
 
-test("backup places theme gives place-specific city chunks the strongest penalty", async () => {
+test("backup places theme puts place-specific city chunks in a lower tier", async () => {
   const backupPlacesIndex = {
     chunks: [
       {
@@ -215,9 +223,12 @@ test("backup places theme gives place-specific city chunks the strongest penalty
   );
 
   const placeBackup = result.diagnostics.chunks.find((item) => item.chunk_id === "place-backup");
-  assert.equal(placeBackup.score.signals.city_place_specific_penalty, 1);
-  assert.equal(placeBackup.score.weights.city_place_specific_penalty, -0.3);
-  assert.equal(placeBackup.score.contributions.city_place_specific_penalty, -0.3);
+  assert.equal(placeBackup.business.place_specific, true);
+  assert.equal(placeBackup.business.tier, 1);
+  assert.equal(placeBackup.business.tilt_multiplier, 1);
+  assert.equal(result.results.find((item) => item.chunk_id === "place-backup").place_specific, true);
+  assert.equal(result.results.find((item) => item.chunk_id === "place-backup").tier, 1);
+  assert.equal(placeBackup.score.total > result.diagnostics.chunks.find((item) => item.chunk_id === "city-backup").score.total, true);
 });
 
 test("city retrieval does not fall back to title or text city matches without candidate_cities", async () => {
@@ -271,7 +282,7 @@ test("query matching only uses title and text", async () => {
   );
 });
 
-test("video chunks receive a negative score contribution", async () => {
+test("video chunks receive a soft business tilt outside relevance score", async () => {
   const videoIndex = {
     chunks: [
       {
@@ -304,11 +315,12 @@ test("video chunks receive a negative score contribution", async () => {
     result.results.map((item) => item.chunk_id),
     ["plain-note", "video-note"],
   );
-  assert.equal(result.results[0].score > result.results[1].score, true);
+  assert.equal(result.results[0].score, result.results[1].score);
 
   const video = result.diagnostics.chunks.find((item) => item.chunk_id === "video-note");
-  assert.equal(video.score.signals.video_source_penalty, 1);
-  assert.equal(video.score.contributions.video_source_penalty, -0.15);
+  assert.equal(Object.hasOwn(video.score.signals, "video_source_penalty"), false);
+  assert.equal(video.business.is_video, true);
+  assert.equal(video.business.tilt_multiplier, 0.85);
 });
 
 test("query embedding similarity participates in ranking when chunk embeddings exist", async () => {
