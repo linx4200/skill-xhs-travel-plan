@@ -91,3 +91,32 @@ export const RAG_RETRIEVAL_DEFAULTS = {
   // 正式生成走 rag:workspace，不看这个值。
   ragRetrieveResultChunks: 8,
 };
+
+/**
+ * Rerank 默认配置。常规检索默认不启用 rerank；只有 CLI 或调用方显式开启时，
+ * 才会访问本地 HTTP rerank 服务。
+ *
+ * queryTemplates 是固定自然语言模板表，只用于 rerank API，不改变 embedding query。
+ */
+export const RAG_RERANK_DEFAULTS = {
+  enabled: false,
+  url: "http://127.0.0.1:11435/rerank",
+  model: "onnx-community/Qwen3-Reranker-0.6B-ONNX",
+  recallWidth: 12,
+  probThreshold: 0.9,
+  timeoutMs: 120000,
+  queryTemplates: {
+    place: {
+      highlights: "{name}有哪些值得专门停留、拍照或体验的景观亮点和游玩看点？",
+      nearby: "{name}周边有哪些顺路、附近或可组合游玩的地点和路线建议？",
+      facilities: "{name}现场有哪些厕所、补给、餐饮、休息区、游客中心等设施信息？",
+    },
+    city: {
+      backup_places: "{name}有哪些可作为行程备选、顺路补充或城市周边的小众地点？",
+    },
+  },
+  highRiskThemes: {
+    place: ["highlights", "nearby", "facilities"],
+    city: ["backup_places"],
+  },
+};
