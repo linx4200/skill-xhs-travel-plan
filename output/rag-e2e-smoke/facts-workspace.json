@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "needs_agent_review": true,
+  "title": "2026国庆宜宾自驾攻略",
+  "source": {
+    "resource_root": "",
+    "resource_index": "",
+    "source_chunks": "/Users/xinran.lliu/Downloads/skill-travel-plan-test/resources-chunk/rag-index.json",
+    "photo_resource_root": "/Users/xinran.lliu/Documents/skill-xhs-travel-plan/output/rag-e2e-smoke",
+    "route_structure": "route-structure.json",
+    "rag_index": "rag-index.json"
+  },
+  "trip": {
+    "mode": "self-drive",
+    "days": [
+      {
+        "day": 1,
+        "date": "2026-10-02",
+        "title": "2026-10-02 - 宜宾到毕节，经兴文石海",
+        "lodging_city": "毕节",
+        "summary": "",
+        "route_places": [
+          "兴文石海"
+        ],
+        "timeline": [],
+        "notes": [],
+        "confirmations": [],
+        "source_line": "Day1, 10月2日，从宜宾出发到达贵州毕节，途径兴文石海游玩，宿毕节。"
+      },
+      {
+        "day": 2,
+        "date": "2026-10-03",
+        "title": "2026-10-03 - 毕节九洞天景区",
+        "lodging_city": "毕节",
+        "summary": "",
+        "route_places": [
+          "九洞天景区"
+        ],
+        "timeline": [],
+        "notes": [],
+        "confirmations": [],
+        "source_line": "Day2, 10月3日, 游玩毕节九洞天景区，继续住毕节。"
+      }
+    ]
+  },
+  "places": {
+    "兴文石海": {
+      "summary": "",
+      "elevation_m": null,
+      "elevation_source_url": "",
+      "elevation_checked_at": "",
+      "highlights": [],
+      "drawbacks": [],
+      "opening_hours": [],
+      "tickets": [],
+      "duration": "",
+      "routes": [],
+      "play_options": [],
+      "practical_info": [],
+      "notes": [],
+      "conflicts": [],
+      "photos": [],
+      "source_files": [
+        "resources-md/007-xingwenshihai-note.md",
+        "resources-md/037-shihai-note.md",
+        "resources-md/045-shihai-note.md",
+        "resources-md/兴文石海-干扰.md",
+        "resources-md/video-兴文石海-info.md",
+        "resources-md/xingwenshihai-1.txt",
+        "resources-md/xingwenshihai-2.txt"
+      ]
+    },
+    "九洞天景区": {
+      "summary": "",
+      "elevation_m": null,
+      "elevation_source_url": "",
+      "elevation_checked_at": "",
+      "highlights": [],
+      "drawbacks": [],
+      "opening_hours": [],
+      "tickets": [],
+      "duration": "",
+      "routes": [],
+      "play_options": [],
+      "practical_info": [],
+      "notes": [],
+      "conflicts": [],
+      "photos": [],
+      "source_files": [
+        "resources-md/006-jiudongtian-note.md",
+        "resources-md/014-jiudongtian-note.md",
+        "resources-md/016-jiudongtian-note.md",
+        "resources-md/018-jiudongtian-note.md",
+        "resources-md/023-jiudongtian-note.md",
+        "resources-md/024-jiudongtian-note.md",
+        "resources-md/025-jdt-note.md",
+        "resources-md/030-jdt-note.md",
+        "resources-md/040-jdt-note.md",
+        "resources-md/048-jdt-note.md",
+        "resources-md/049-jdt-note.md",
+        "resources-md/九洞天.md",
+        "resources-md/九洞天2.md"
+      ]
+    }
+  },
+  "cities": {
+    "宜宾": {
+      "include": false,
+      "summary": "",
+      "elevation_m": null,
+      "elevation_source_url": "",
+      "elevation_checked_at": "",
+      "overview": [],
+      "backup_places": [],
+      "foods": [],
+      "lodging": [],
+      "transport": [],
+      "shopping": [],
+      "notes": [],
+      "source_files": [
+        "resources-md/007-xingwenshihai-note.md",
+        "resources-md/037-shihai-note.md",
+        "resources-md/045-shihai-note.md"
+      ]
+    },
+    "毕节": {
+      "include": false,
+      "summary": "",
+      "elevation_m": null,
+      "elevation_source_url": "",
+      "elevation_checked_at": "",
+      "overview": [],
+      "backup_places": [],
+      "foods": [],
+      "lodging": [],
+      "transport": [],
+      "shopping": [],
+      "notes": [],
+      "source_files": [
+        "resources-md/006-jiudongtian-note.md",
+        "resources-md/014-jiudongtian-note.md",
+        "resources-md/016-jiudongtian-note.md",
+        "resources-md/018-jiudongtian-note.md",
+        "resources-md/024-jiudongtian-note.md",
+        "resources-md/030-jdt-note.md",
+        "resources-md/040-jdt-note.md",
+        "resources-md/048-jdt-note.md",
+        "resources-md/049-jdt-note.md",
+        "resources-md/毕节.md",
+        "resources-md/九洞天2.md"
+      ]
+    }
+  },
+  "global_notes": [],
+  "confirm_before_departure": []
+}

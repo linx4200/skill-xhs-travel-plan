@@ -1,0 +1,31 @@
+{
+  "title": "2026国庆宜宾自驾攻略",
+  "mode": "self-drive",
+  "cities": ["宜宾", "毕节"],
+  "days": [
+    {
+      "day": 1,
+      "date": "2026-10-02",
+      "title": "2026-10-02 - 宜宾到毕节，经兴文石海",
+      "lodging_city": "毕节",
+      "summary": "",
+      "route_places": ["兴文石海"],
+      "timeline": [],
+      "notes": [],
+      "confirmations": [],
+      "source_line": "Day1, 10月2日，从宜宾出发到达贵州毕节，途径兴文石海游玩，宿毕节。"
+    },
+    {
+      "day": 2,
+      "date": "2026-10-03",
+      "title": "2026-10-03 - 毕节九洞天景区",
+      "lodging_city": "毕节",
+      "summary": "",
+      "route_places": ["九洞天景区"],
+      "timeline": [],
+      "notes": [],
+      "confirmations": [],
+      "source_line": "Day2, 10月3日, 游玩毕节九洞天景区，继续住毕节。"
+    }
+  ]
+}

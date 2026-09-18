@@ -1,0 +1,14 @@
+{
+  "chunk_id": "smoke-xingwen-shihai-food-off-theme",
+  "source_uri": "fixtures/smoke/兴文石海-餐饮补给.md",
+  "path": "fixtures/smoke/兴文石海-餐饮补给.md",
+  "title": "兴文石海周边餐饮补给记录",
+  "kind": "note",
+  "candidate_places": ["兴文石海"],
+  "candidate_cities": ["宜宾"],
+  "metadata": {
+    "fixture_role": "same-place-off-theme",
+    "expected_behavior": "应命中兴文石海这个地点，但不应作为 highlights、tickets 或 routes 的主要事实来源；可用于 facilities/practical_info 类主题观察。"
+  },
+  "text": "兴文石海游客中心外侧和停车区附近有简餐、面馆和豆花饭一类午餐选择，适合作为自驾中途补给点。节假日中午可能排队，建议错峰吃饭或自备少量干粮和饮水。"
+}
