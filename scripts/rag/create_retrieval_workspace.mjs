@@ -297,6 +297,7 @@ function rerankScoringMetadata(rerankOptions = {}) {
     model_id: resolved.model || null,
     recall_width: resolved.recallWidth,
     probability_threshold: resolved.probThreshold,
+    probability_threshold_by_theme: resolved.probThresholdByTheme,
     theme_scope: rerankThemeScope(resolved),
     threshold_filtering: true,
     business_rules_preserved: true,

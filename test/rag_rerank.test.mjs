@@ -56,7 +56,7 @@ test("fixed template table builds natural-language rerank queries", () => {
   );
   assert.equal(
     buildRerankQuery({ type: "place", name: "大山包" }, "facilities"),
-    "大山包游玩有什么厕所、停车、吃饭、住宿、骑马等实用配套信息？",
+    "大山包游玩材料是否提到任一实用配套信息，例如厕所/卫生间、停车/接驳/观光车、游客中心、吃饭住宿、补给/小卖部、休息区、寄存或充电？",
   );
   assert.equal(
     buildRerankQuery({ type: "place", name: "大山包" }, "unknown_theme"),
@@ -86,6 +86,37 @@ test("mock reranker reorders rows and filters low-probability candidates", async
   assert.equal(result.diagnostics.kept_count, 2);
   assert.equal(result.diagnostics.filtered_count, 1);
   assert.equal(result.diagnostics.items.find((item) => item.chunk_id === "off-topic").passed_threshold, false);
+});
+
+test("theme-specific threshold allows weaker facilities candidates without lowering highlights", async () => {
+  const config = enabledConfig({
+    probThresholdByTheme: {
+      place: {
+        facilities: 0.75,
+      },
+    },
+    reranker: async ({ documents }) =>
+      documents.map((document) => ({ id: document.id, probability: document.id === "mid" ? 0.76 : 0.74 })),
+  });
+
+  const facilities = await rerankRows(
+    [row("mid"), row("low")],
+    { entity: { type: "place", name: "A地方" }, theme: "facilities", topK: 2 },
+    config,
+  );
+  const highlights = await rerankRows(
+    [row("mid"), row("low")],
+    { entity: { type: "place", name: "A地方" }, theme: "highlights", topK: 2 },
+    config,
+  );
+
+  assert.deepEqual(
+    facilities.rows.map((item) => item.chunk.chunk_id),
+    ["mid"],
+  );
+  assert.equal(facilities.diagnostics.probability_threshold, 0.75);
+  assert.deepEqual(highlights.rows, []);
+  assert.equal(highlights.diagnostics.probability_threshold, 0.9);
 });
 
 test("threshold filtering can return fewer rows than topK", async () => {
