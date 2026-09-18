@@ -104,6 +104,10 @@ export const RAG_RERANK_DEFAULTS = {
   model: "onnx-community/Qwen3-Reranker-0.6B-ONNX",
   recallWidth: 12,
   probThreshold: 0.9,
+
+  // 单条 rerank document 的正文截断上限，只用于防止异常长文本拖慢推理。
+  maxDocChars: 700,
+
   timeoutMs: 120000,
   queryTemplates: {
     place: {
