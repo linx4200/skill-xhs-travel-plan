@@ -24,6 +24,13 @@ export function createAdjudicationSkeleton(runId, factsEvaluation) {
   };
 }
 
+function updatedLostItems(lostItems, overrides) {
+  return asList(lostItems).filter((item) => {
+    const override = overrides.get(item.item_id);
+    return !override || !override.facts_covered;
+  });
+}
+
 export function applyCoverageOverrides(factsEvaluation, adjudications) {
   const overrides = new Map(asList(adjudications?.coverage_overrides).map((item) => [item.item_id, item]));
   const itemResults = asList(factsEvaluation?.item_results).map((result) => {
@@ -43,6 +50,8 @@ export function applyCoverageOverrides(factsEvaluation, adjudications) {
   return {
     ...factsEvaluation,
     item_results: itemResults,
+    lost_items: updatedLostItems(factsEvaluation.lost_items, overrides),
+    adjudication_needed: asList(factsEvaluation.adjudication_needed).filter((item) => !overrides.has(item.item_id)),
     metrics: {
       ...factsEvaluation.metrics,
       CIR: {

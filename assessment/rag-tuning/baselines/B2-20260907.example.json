@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "baseline_id": "B2",
+  "baseline_name": "20260907",
+  "capability": "full",
+  "version": 1,
+  "created_at": "2026-01-01T00:00:00.000Z",
+  "source_run": "outputs/2026-example-self-drive-plan",
+  "items": [
+    {
+      "id": "B2-place-0001",
+      "text": "示例地点 A 适合作为城市 B 到城市 C 途中的半日自然景观停留，亮点在地貌与溶洞，短板是导视与交通衔接体验不稳定。",
+      "domain": "decision_support",
+      "target_type": "place",
+      "target_name": "示例地点A",
+      "theme": "highlights",
+      "criticality": "core-quality",
+      "source_chunk_ids": [
+        "example-place-a-note.md#3",
+        "example-place-a-note.md#2"
+      ],
+      "evidence_ref": {
+        "rag_index": "outputs/2026-example-self-drive-plan/rag-index.json",
+        "retrieval_workspace": "outputs/2026-example-self-drive-plan/retrieval-workspace.json",
+        "chunk_ids": [
+          "example-place-a-note.md#3",
+          "example-place-a-note.md#2"
+        ],
+        "note": "按 target/theme 从受控证据来源归因，未复制大段原文。"
+      },
+      "match_hints": [
+        "示例地点 A 适合作为",
+        "导视与交通衔接体验不稳定"
+      ],
+      "added_at": "2026-01-01T00:00:00.000Z",
+      "source_run": "outputs/2026-example-self-drive-plan"
+    },
+    {
+      "id": "B2-place-0002",
+      "text": "示例地点 A 停车场容量有限，节假日需预留排队时间或选择错峰抵达。",
+      "domain": "risk_avoidance",
+      "target_type": "place",
+      "target_name": "示例地点A",
+      "theme": "safety",
+      "criticality": "critical",
+      "source_chunk_ids": [
+        "example-place-a-note.md#7"
+      ],
+      "evidence_ref": {
+        "rag_index": "outputs/2026-example-self-drive-plan/rag-index.json",
+        "retrieval_workspace": "outputs/2026-example-self-drive-plan/retrieval-workspace.json",
+        "chunk_ids": [
+          "example-place-a-note.md#7"
+        ],
+        "note": "按 target/theme 从受控证据来源归因，未复制大段原文。"
+      },
+      "match_hints": [
+        "停车场容量有限",
+        "错峰抵达"
+      ],
+      "added_at": "2026-01-01T00:00:00.000Z",
+      "source_run": "outputs/2026-example-self-drive-plan"
+    },
+    {
+      "id": "B2-city-0001",
+      "text": "示例城市 B 老城区路网单行线密集，自驾建议优先停靠外围停车场再步行进入。",
+      "domain": "execution_fact",
+      "target_type": "city",
+      "target_name": "示例城市B",
+      "theme": "transport",
+      "criticality": "critical",
+      "source_chunk_ids": [
+        "example-city-b-note.md#4",
+        "example-city-b.txt#2"
+      ],
+      "evidence_ref": {
+        "rag_index": "outputs/2026-example-self-drive-plan/rag-index.json",
+        "retrieval_workspace": "outputs/2026-example-self-drive-plan/retrieval-workspace.json",
+        "chunk_ids": [
+          "example-city-b-note.md#4",
+          "example-city-b.txt#2"
+        ],
+        "note": "按 target/theme 从受控证据来源归因，未复制大段原文。"
+      },
+      "match_hints": [
+        "老城区路网单行线密集",
+        "优先停靠外围停车场"
+      ],
+      "added_at": "2026-01-01T00:00:00.000Z",
+      "source_run": "outputs/2026-example-self-drive-plan"
+    },
+    {
+      "id": "B2-day-0001",
+      "text": "第 1 天以城市 B 到城市 C 的长距离自驾为主，途中景点停留时间应控制在半日内，避免夜间赶路。",
+      "domain": "decision_support",
+      "target_type": "day",
+      "target_name": "day-1",
+      "theme": "routes",
+      "criticality": "core-quality",
+      "source_chunk_ids": [
+        "example-route-note.md#1"
+      ],
+      "evidence_ref": {
+        "rag_index": "outputs/2026-example-self-drive-plan/rag-index.json",
+        "retrieval_workspace": "outputs/2026-example-self-drive-plan/retrieval-workspace.json",
+        "chunk_ids": [
+          "example-route-note.md#1"
+        ],
+        "note": "按 target/theme 从受控证据来源归因，未复制大段原文。"
+      },
+      "match_hints": [
+        "长距离自驾",
+        "避免夜间赶路"
+      ],
+      "added_at": "2026-01-01T00:00:00.000Z",
+      "source_run": "outputs/2026-example-self-drive-plan"
+    }
+  ]
+}

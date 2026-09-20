@@ -2,3 +2,21 @@ node_modules
 .DS_Store
 outputs
 .workbuddy
+
+# ---- 个人评测数据（仅本地保留，不入库）----
+# 基准清单属于个人评测资产：本地保留，仓库只发布 *.example.json 结构示例。
+assessment/rag-tuning/baselines/*
+!assessment/rag-tuning/baselines/.gitkeep
+!assessment/rag-tuning/baselines/*.example.json
+
+# 评测运行记录同理：只发布 *-example/ 目录作为结构参考。
+assessment/rag-tuning/runs/*
+!assessment/rag-tuning/runs/.gitkeep
+!assessment/rag-tuning/runs/*-example/
+
+# ---- output/ 只发布验证方案文档 ----
+# 其余为 smoke 验证的运行快照（facts / 检索 / 检索日志等），属个人数据。
+output/*
+!output/rag-e2e-smoke/
+output/rag-e2e-smoke/*
+!output/rag-e2e-smoke/README.md

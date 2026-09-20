@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "baseline_id": "B1",
+  "baseline_name": "rag-e2e-smoke",
+  "capability": "retrieval_and_facts",
+  "version": 1,
+  "created_at": "2026-01-01T00:00:00.000Z",
+  "source_run": "output/rag-e2e-smoke",
+  "items": [
+    {
+      "id": "B1-place-0001",
+      "text": "示例地点 A 是以地质景观为核心的景区，适合半日到一日游。",
+      "domain": "decision_support",
+      "target_type": "place",
+      "target_name": "示例地点A",
+      "theme": "highlights",
+      "criticality": "core-quality",
+      "source_chunk_ids": [
+        "example-place-a-note.md#3",
+        "example-place-a-note.md#2",
+        "example-place-a.txt#1"
+      ],
+      "evidence_ref": {
+        "rag_index": "output/rag-e2e-smoke/rag-index.json",
+        "retrieval_workspace": "output/rag-e2e-smoke/retrieval-workspace.json",
+        "chunk_ids": [
+          "example-place-a-note.md#3",
+          "example-place-a-note.md#2",
+          "example-place-a.txt#1"
+        ],
+        "note": "按 target/theme 从受控证据来源归因，未复制大段原文。"
+      },
+      "match_hints": [
+        "示例地点 A 是以地质景观",
+        "适合半日到一日游"
+      ],
+      "added_at": "2026-01-01T00:00:00.000Z",
+      "source_run": "output/rag-e2e-smoke"
+    },
+    {
+      "id": "B1-place-0002",
+      "text": "示例地点 A 门票与开放时间以出行前官方渠道确认为准。",
+      "domain": "execution_fact",
+      "target_type": "place",
+      "target_name": "示例地点A",
+      "theme": "tickets",
+      "criticality": "critical",
+      "source_chunk_ids": [
+        "example-place-a-note.md#5"
+      ],
+      "evidence_ref": {
+        "rag_index": "output/rag-e2e-smoke/rag-index.json",
+        "retrieval_workspace": "output/rag-e2e-smoke/retrieval-workspace.json",
+        "chunk_ids": [
+          "example-place-a-note.md#5"
+        ],
+        "note": "按 target/theme 从受控证据来源归因，未复制大段原文。"
+      },
+      "match_hints": [
+        "门票",
+        "出行前确认"
+      ],
+      "added_at": "2026-01-01T00:00:00.000Z",
+      "source_run": "output/rag-e2e-smoke"
+    },
+    {
+      "id": "B1-city-0001",
+      "text": "示例城市 B 住宿建议优先选择靠近次日出发点或主干道的位置，便于自驾衔接。",
+      "domain": "decision_support",
+      "target_type": "city",
+      "target_name": "示例城市B",
+      "theme": "lodging",
+      "criticality": "mid",
+      "source_chunk_ids": [
+        "example-city-b-note.md#2",
+        "example-city-b.txt#4"
+      ],
+      "evidence_ref": {
+        "rag_index": "output/rag-e2e-smoke/rag-index.json",
+        "retrieval_workspace": "output/rag-e2e-smoke/retrieval-workspace.json",
+        "chunk_ids": [
+          "example-city-b-note.md#2",
+          "example-city-b.txt#4"
+        ],
+        "note": "按 target/theme 从受控证据来源归因，未复制大段原文。"
+      },
+      "match_hints": [
+        "住宿",
+        "靠近次日出发点"
+      ],
+      "added_at": "2026-01-01T00:00:00.000Z",
+      "source_run": "output/rag-e2e-smoke"
+    }
+  ]
+}

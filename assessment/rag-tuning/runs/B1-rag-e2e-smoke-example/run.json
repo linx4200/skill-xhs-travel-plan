@@ -1,0 +1,283 @@
+{
+  "schema_version": 1,
+  "run_id": "B1-rag-e2e-smoke-example",
+  "baseline_id": "B1",
+  "created_at": "2026-09-20T05:44:04.321Z",
+  "paths": {
+    "facts_workspace": "output/rag-e2e-smoke/facts-workspace.json",
+    "retrieval_workspace": "output/rag-e2e-smoke/retrieval-workspace.json",
+    "retrieval_log": "output/rag-e2e-smoke/retrieval-log.json",
+    "html_dir": "",
+    "params": "params.json"
+  },
+  "params": {
+    "schema_version": 1,
+    "captured_at": "2026-09-20T05:44:04.338Z",
+    "config_source": "scripts/rag/rag_retrieval_config.mjs",
+    "place_themes": {
+      "highlights": [
+        "看点",
+        "出片",
+        "宝藏",
+        "必去",
+        "值得",
+        "精华",
+        "机位",
+        "推荐",
+        "最佳",
+        "夯"
+      ],
+      "drawbacks": [
+        "避雷",
+        "避坑",
+        "缺点",
+        "差评",
+        "不推荐",
+        "踩雷",
+        "失望"
+      ],
+      "tickets": [
+        "门票",
+        "票价",
+        "预约",
+        "开放",
+        "优惠",
+        "套票",
+        "免票",
+        "半价",
+        "购票",
+        "闭园",
+        "营业"
+      ],
+      "transport": [
+        "停车",
+        "导航",
+        "交通",
+        "路况",
+        "入口",
+        "自驾",
+        "高铁",
+        "塞车",
+        "包车",
+        "打车",
+        "班车",
+        "接驳"
+      ],
+      "routes": [
+        "路线",
+        "玩法",
+        "游览",
+        "顺序",
+        "环线",
+        "徒步",
+        "索道",
+        "游船",
+        "观光车",
+        "打卡点"
+      ],
+      "nearby": [
+        "周边",
+        "附近",
+        "景点",
+        "顺路",
+        "路线",
+        "玩法",
+        "半日游",
+        "一日游",
+        "小众",
+        "打卡点"
+      ],
+      "crowds": [
+        "人流",
+        "人少",
+        "人多",
+        "错峰",
+        "排队",
+        "拥挤",
+        "限流",
+        "早去",
+        "晚去",
+        "工作日",
+        "节假日",
+        "旺季"
+      ],
+      "accessibility": [
+        "无人机",
+        "老人",
+        "小孩",
+        "亲子",
+        "带娃",
+        "推车",
+        "无障碍",
+        "台阶",
+        "体力"
+      ],
+      "facilities": [
+        "厕所",
+        "卫生间",
+        "补给",
+        "吃的",
+        "美食",
+        "餐饮",
+        "小卖部",
+        "休息区",
+        "寄存",
+        "充电",
+        "游客中心"
+      ],
+      "safety": [
+        "安全",
+        "注意",
+        "贴士",
+        "tips",
+        "防滑",
+        "风大",
+        "保暖",
+        "防晒",
+        "雨具",
+        "高反",
+        "海拔",
+        "温差",
+        "封路"
+      ]
+    },
+    "city_themes": {
+      "foods": [
+        "美食",
+        "好吃",
+        "餐厅",
+        "小吃",
+        "夜市",
+        "宵夜",
+        "夜宵",
+        "早餐",
+        "早市",
+        "烧烤",
+        "火锅",
+        "蔬菜",
+        "咖啡",
+        "奶茶",
+        "特色菜",
+        "本地人"
+      ],
+      "lodging": [
+        "住宿",
+        "酒店",
+        "民宿",
+        "客栈",
+        "青旅",
+        "位置",
+        "商圈",
+        "隔音",
+        "性价比"
+      ],
+      "transport": [
+        "停车",
+        "路况",
+        "导航",
+        "限行",
+        "交通",
+        "自驾",
+        "高铁",
+        "大巴",
+        "包车",
+        "打车",
+        "拼车",
+        "公交"
+      ],
+      "backup_places": [
+        "景点",
+        "观景台",
+        "打卡点",
+        "冷门",
+        "小众",
+        "顺路",
+        "附近",
+        "周边",
+        "文创",
+        "手信",
+        "伴手礼",
+        "带娃"
+      ],
+      "notes": [
+        "风险",
+        "注意",
+        "安全",
+        "贴士",
+        "tips",
+        "天气",
+        "海拔",
+        "温差",
+        "高反",
+        "绕路",
+        "限流",
+        "堵车",
+        "物价",
+        "宰客",
+        "预约",
+        "关门"
+      ]
+    },
+    "rag_scoring": {
+      "cityTierThemes": [
+        "backup_places"
+      ],
+      "videoTilt": 0.15,
+      "defaultCityTilt": 0.1,
+      "cityTiltByTheme": {
+        "foods": 0.1,
+        "lodging": 0.1,
+        "transport": 0.1,
+        "notes": 0.1
+      }
+    },
+    "retrieval_defaults": {
+      "placeMaxThemeChunks": 5,
+      "cityMaxThemeChunks": 5,
+      "maxPlaceChunks": 50,
+      "maxCityChunks": 25,
+      "keywordScoreTermCap": 6,
+      "minHealthyPlaceChunks": 3,
+      "minHealthyCityChunks": 2,
+      "ragRetrieveResultChunks": 8
+    },
+    "rerank_defaults": {
+      "enabled": false,
+      "url": "http://127.0.0.1:11435/rerank",
+      "model": "onnx-community/Qwen3-Reranker-0.6B-ONNX",
+      "recallWidth": 12,
+      "probThreshold": 0.9,
+      "probThresholdByTheme": {
+        "place": {
+          "facilities": 0.7
+        },
+        "city": {}
+      },
+      "maxDocChars": 700,
+      "timeoutMs": 120000,
+      "queryTemplates": {
+        "place": {
+          "highlights": "{name}有哪些值得专门停留、拍照或体验的景观亮点和游玩看点？",
+          "nearby": "{name}周边有哪些顺路、附近或可组合游玩的地点和路线建议？",
+          "routes": "{name}游玩材料是否提供具体游览路线、先后顺序、环线、徒步、游船、观光车或索道等动线玩法安排？",
+          "facilities": "{name}游玩材料是否提到任一实用配套信息，例如厕所/卫生间、停车/接驳/观光车、游客中心、吃饭住宿、补给/小卖部、休息区、寄存或充电？"
+        },
+        "city": {
+          "backup_places": "{name}有哪些可作为行程备选、顺路补充或城市周边的小众地点？"
+        }
+      },
+      "highRiskThemes": {
+        "place": [
+          "highlights",
+          "nearby",
+          "routes",
+          "facilities"
+        ],
+        "city": [
+          "backup_places"
+        ]
+      }
+    },
+    "cli_overrides": {}
+  }
+}

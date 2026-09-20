@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "baseline_id": "B1",
+  "run_id": "B1-rag-e2e-smoke-example",
+  "lost_items": [],
+  "new_items": [],
+  "misplaced_items": [],
+  "unsupported_facts": [],
+  "duplicates": [],
+  "attribution": []
+}

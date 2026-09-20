@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "baseline_id": "B2",
+  "baseline_name": "20260907",
+  "run_id": "B2-20260907-example",
+  "generated_at": "2026-09-20T05:44:16.031Z",
+  "conclusion": "PASS_WITH_NOTES",
+  "gates": {
+    "G1": {
+      "status": "PASS",
+      "summary": "HTML 机械校验。",
+      "verify_error_count": 0
+    },
+    "G2": {
+      "status": "PASS",
+      "summary": "critical 条目零丢失。",
+      "retrieval_lost": 0,
+      "facts_lost": 0,
+      "render_lost": 0
+    },
+    "G3": {
+      "status": "PASS",
+      "summary": "高置信归位错误为 0。",
+      "misplaced_items": 0
+    },
+    "G4": {
+      "status": "PASS",
+      "summary": "关键类越界事实为 0。",
+      "unsupported_facts": 0
+    }
+  },
+  "metrics": {
+    "retrieval": {
+      "CIR": {
+        "critical_items": 97,
+        "retained": 97,
+        "lost": 0,
+        "rate": 1
+      },
+      "R1": {
+        "critical_source_chunks": 485,
+        "retrieved": 485,
+        "lost": 0,
+        "rate": 1
+      },
+      "R2": {
+        "source_chunks": 1240,
+        "retrieved": 1240,
+        "lost": 0,
+        "rate": 1
+      },
+      "R3": {
+        "target_theme_count": 60,
+        "empty_theme_count": 0,
+        "rate": 0,
+        "empty_themes": []
+      },
+      "R4": {}
+    },
+    "facts": {
+      "CIR": {
+        "critical_items": 97,
+        "retained": 97,
+        "lost": 0,
+        "rate": 1
+      },
+      "N1": {
+        "critical_lost": 0
+      },
+      "N2": {
+        "noncritical_lost": 0
+      },
+      "N3": {
+        "misplaced_items": 0
+      },
+      "N7": {
+        "actionability": null
+      },
+      "low_confidence_count": 0,
+      "facts_drop_count": 0,
+      "retrieved_facts_drop_count": 0
+    },
+    "html": {
+      "CIR": {
+        "critical_items": 97,
+        "retained": 97,
+        "lost": 0,
+        "rate": 1
+      },
+      "N3": {
+        "misplaced_items": 0
+      },
+      "N8": {
+        "structure_complete": true,
+        "html_file_count": 10
+      },
+      "render_drop_count": 0,
+      "low_confidence_count": 0
+    },
+    "deltas": {
+      "lost_items": 0,
+      "new_items": 0,
+      "misplaced_items": 0,
+      "unsupported_facts": 0,
+      "duplicates": 0
+    },
+    "semantic_minimum": null
+  },
+  "semantic_scores": [],
+  "notes": [
+    "检索日志缺失或未接入，归因处于降级模式。"
+  ],
+  "recommendations": [
+    "Gate 已满足，按 notes 处理低置信项和软指标。"
+  ]
+}
