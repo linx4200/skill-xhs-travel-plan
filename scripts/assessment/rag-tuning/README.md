@@ -49,6 +49,44 @@ npm run assessment:evaluate -- \
 - `deltas.json`：丢失项、新增候选、归位错误、越界事实和归因。
 - `adjudications.json`：低置信覆盖和语义评分的人工裁定骨架。
 
+## 天花板评估（`capability: ceiling`）
+
+B3 是**天花板基准**（各批次优点的并集），用来当**调参目标函数**，不是验收线。
+它的 checklist 带 `capability: "ceiling"`，评估走专用分支：**4 个 Gate 全部跳过、永不判 FAIL**，
+`conclusion` 取新值 `CEILING`，判据是 `report.coverage`。
+
+```bash
+npm run assessment:ceiling        # 由覆盖清单合成 B3-ceiling.checklist.json
+npm run assessment:ceiling-menu   # 就地重写两份 md 的 §3 可选格子菜单
+
+npm run assessment:prepare -- \
+  --baseline-id B3 \
+  --tag ceiling-smoke \
+  --facts outputs/<批次>/facts-workspace.json \
+  --retrieval-workspace outputs/<批次>/retrieval-workspace.json \
+  --html-dir outputs/<批次>
+
+npm run assessment:evaluate -- \
+  --baseline assessment/rag-tuning/baselines/B3-ceiling.checklist.json \
+  --run assessment/rag-tuning/runs/<run_id>
+```
+
+报告标题为「RAG 天花板覆盖率报告」，含三节：**分层覆盖率 / 按 criticality 分解 / 缺口清单（按权重排序）**。
+Gate 表保留但降级为「跳过判定，仅记录数值」（数值仍在 `report.gates.*`，可用于诊断）。
+
+口径要点（完整说明见 `assessment/rag-tuning/CEILING-INTENT.md` §6.2）：
+
+| 指标 | 分母 | 读法 |
+|---|---|---|
+| `layers.<L>.rate` / `weighted_rate` | 全部天花板条目 | 材料广度：离理想并集有多远。**跨参数组比较看这个** |
+| `layers.<L>.conditional.rate` | 上游已覆盖的条目 | 本层自己的漏损。呈现层用它，才能把「模板问题」和「上游没给材料」分开 |
+| `gaps.items[]` | — | 每条缺口只记**最上游**那一层（`first_missing_layer`），按 criticality 权重降序 |
+
+`critical` 在此模式下是**缺口权重**（critical 4 / core-quality 3 / mid 2 / low 1），不是门槛。
+调 RAG 参数时只看检索层与 facts 层；呈现层受模板影响，会污染参数排序。
+
+> 非 `ceiling` 的基准（B1/B2）**完全不受影响**：report 结构与改动前逐字段一致，不新增 `coverage` 字段。
+
 ## 人工裁定
 
 评估脚本会在 run 目录生成 `adjudications.json`。人工裁定低置信覆盖时，填写 `coverage_overrides`：

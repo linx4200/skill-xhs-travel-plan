@@ -144,7 +144,22 @@ function main() {
     htmlDir: args.htmlDir,
     adjudicationsPath: args.adjudications,
   });
-  console.log(`Assessment ${result.report.conclusion}: ${path.join(result.runDir, "report.md")}`);
+  const reportPath = path.join(result.runDir, "report.md");
+  if (result.report.coverage) {
+    const { layers, gaps, weighted_coverage } = result.report.coverage;
+    const pct = (value) => (value === null || value === undefined ? "N/A" : `${(value * 100).toFixed(1)}%`);
+    const inner = (layer) =>
+      layer.conditional ? `${pct(layer.conditional.rate)}（${layer.conditional.covered}/${layer.conditional.items}）` : "—";
+    console.log(
+      `Ceiling coverage — 整体加权 ${pct(weighted_coverage)}；` +
+        `覆盖率 检索层 ${pct(layers.retrieval.weighted_rate)} / facts 层 ${pct(layers.facts.weighted_rate)} / 呈现层 ${pct(layers.render.weighted_rate)}；` +
+        `层内转化 facts ${inner(layers.facts)} / 呈现 ${inner(layers.render)}。`,
+    );
+    console.log(`缺口 ${gaps.total} 项（检索 ${gaps.by_layer.retrieval} / facts ${gaps.by_layer.facts} / 呈现 ${gaps.by_layer.render}）。`);
+  } else {
+    console.log(`Assessment ${result.report.conclusion}: ${reportPath}`);
+  }
+  console.log(`Report: ${reportPath}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

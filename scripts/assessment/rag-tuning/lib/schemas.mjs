@@ -18,7 +18,10 @@ export const ATTRIBUTION_CODES = [
   "render_drop",
   "unknown",
 ];
-export const REPORT_CONCLUSIONS = ["PASS", "PASS_WITH_NOTES", "FAIL"];
+export const REPORT_CONCLUSIONS = ["PASS", "PASS_WITH_NOTES", "FAIL", "CEILING"];
+// SKIPPED 只在 capability="ceiling"（天花板目标函数）下出现：该模式下 Gate 不判定，
+// 只保留数值供诊断，结论改由 report.coverage 承载。
+export const GATE_STATUSES = ["PASS", "FAIL", "N/A", "SKIPPED"];
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -156,6 +159,16 @@ export function validateReport(report) {
   pushRequired(errors, isNonEmptyString(report.baseline_id), "baseline_id");
   pushRequired(errors, REPORT_CONCLUSIONS.includes(report.conclusion), "conclusion", `must be one of ${REPORT_CONCLUSIONS.join(", ")}`);
   pushRequired(errors, isObject(report.gates), "gates", "must be an object");
+  if (isObject(report.gates)) {
+    for (const [name, value] of Object.entries(report.gates)) {
+      pushRequired(
+        errors,
+        GATE_STATUSES.includes(value?.status),
+        `gates.${name}.status`,
+        `must be one of ${GATE_STATUSES.join(", ")}`,
+      );
+    }
+  }
   pushRequired(errors, isObject(report.metrics), "metrics", "must be an object");
   if (report.semantic_scores !== undefined) {
     pushRequired(errors, Array.isArray(report.semantic_scores), "semantic_scores", "must be an array");

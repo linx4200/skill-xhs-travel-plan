@@ -22,7 +22,9 @@
     "assessment:baseline": "node scripts/assessment/rag-tuning/build_baseline_checklist.mjs",
     "assessment:evaluate": "node scripts/assessment/rag-tuning/evaluate_run.mjs",
     "assessment:upgrade": "node scripts/assessment/rag-tuning/upgrade_baseline.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "assessment:ceiling": "node scripts/assessment/rag-tuning/build_ceiling_baseline.mjs --coverage assessment/rag-tuning/baselines/B3-ceiling.coverage.md --out assessment/rag-tuning/baselines/B3-ceiling.checklist.json",
+    "assessment:ceiling-menu": "node scripts/assessment/rag-tuning/build_ceiling_baseline.mjs --emit-menu assessment/rag-tuning/baselines/B3-ceiling.coverage.md && node scripts/assessment/rag-tuning/build_ceiling_baseline.mjs --emit-menu assessment/rag-tuning/baselines/TEMPLATE-ceiling-coverage.md"
   },
   "dependencies": {
     "ejs": "^6.0.1"

@@ -12,3 +12,9 @@
 - 增加评估报告生成、有效新增候选输出和基准升级命令，支持只追加 `PASS` run 中人工接受的新增项。
 - 增加 B1/B2 示例评估 run 和 assessment 使用说明，覆盖快评、全评、人工裁定和基准升级。
 - 补齐 B1 smoke facts 并重建 `B1-rag-e2e-smoke.checklist.json`，使 B1 快评基准具备实际 checklist 覆盖。
+- 新增天花板基准 B3：`build_ceiling_baseline.mjs` 由「基底批次 + 覆盖清单」合成 checklist，
+  支持整格替换 / 条号选择 `#1,3` / `合并` / 整目标 `接管` / `删除` 五种动作，
+  并派生检索池与逐行溯源（`ceiling-runs/<run_id>/`）。新增 `assessment:ceiling`、`assessment:ceiling-menu`。
+- 新增 `capability: "ceiling"` 评估分支：Gate 全部 `SKIPPED`（数值保留）、`conclusion` 取 `CEILING`、
+  判据改为 `report.coverage`（分层覆盖率 + 层内转化 + 按 criticality 权重的缺口清单）。
+  非 ceiling 基准的 report 结构逐字段不变。新增 `test/assessment/ceiling_report.test.mjs`（8 条）。

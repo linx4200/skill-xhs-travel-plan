@@ -8,6 +8,11 @@ outputs
 assessment/rag-tuning/baselines/*
 !assessment/rag-tuning/baselines/.gitkeep
 !assessment/rag-tuning/baselines/*.example.json
+# 天花板基准的「空白模板」不含个人数据，入库；填写实例与产物本地保留。
+!assessment/rag-tuning/baselines/TEMPLATE-ceiling-coverage.md
+
+# 天花板构基的合成中间产物：本地保留。
+assessment/rag-tuning/ceiling-runs/*
 
 # 评测运行记录同理：只发布 *-example/ 目录作为结构参考。
 assessment/rag-tuning/runs/*
