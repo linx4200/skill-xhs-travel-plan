@@ -90,13 +90,36 @@ M3 原先定义为 `deltas.json.new_items` 条数，实测不可用：B1 基准�
 
 ## 2. 搜索空间
 
-### 2.1 允许动的三层
+### 2.1 允许动的旋钮（L1 配额 / L3 降权 / L4 rerank）
 
 | 层 | 内容 | 是否有 CLI 入口 | 写入方式 |
 |---|---|---|---|
 | L1 配额 | `placeMaxThemeChunks`、`cityMaxThemeChunks`、`maxPlaceChunks`、`maxCityChunks` | 有（`--place-top-k` / `--city-top-k` / `--max-place-chunks` / `--max-city-chunks`） | CLI 覆盖，零侵入 |
 | L3 降权系数 | `RAG_SCORING.videoTilt`、`defaultCityTilt`、`cityTiltByTheme`、`cityTierThemes` | **无** | 临时改 `rag_retrieval_config.mjs` + 强制还原 |
 | L4 rerank | 开关、`probThreshold`、`recallWidth` | 有（`--rerank` / `--rerank-threshold` / `--rerank-recall-width`） | CLI 覆盖，零侵入 |
+| L4 rerank —— **主题启用范围** | `highRiskThemes` 白名单的扩展、`allThemes`（全主题）、`extraThemes`（点名追加） | 有（`--rerank-all-themes` / `--rerank-theme <theme>`），两个入口脚本均支持 | CLI 覆盖，零侵入。**必须纳入搜索**：见 §2.1.1 |
+
+#### 2.1.1 rerank 主题启用范围（显式授权，2026-09-20 补）
+
+**默认范围**（`RAG_RERANK_DEFAULTS.highRiskThemes`）：景点 `highlights` / `nearby` / `routes` / `facilities`，城市 `backup_places`。范围外的 theme 不进 rerank。
+
+**两个旋钮**：
+
+| 旋钮 | CLI | 语义 |
+|---|---|---|
+| 全主题 | `--rerank-all-themes` | 所有 theme 都走 rerank（`theme_scope.all_themes: true`，白名单列表仍照常输出） |
+| 点名追加 | `--rerank-theme <theme>` | 在当前白名单上追加指定 theme，景点与城市两套名单同时扩展 |
+
+**为什么必须搜**：P2 实测该维度有效（候选 F2 = 窗口 24 + 全主题 rerank：R1 0.7797→0.8983、R2 0.8136→0.8362、读取量 −18.3%），是 P2 认定的**两个有效旋钮之一**。不把它排进候选，等于自弃一个已知有效维度。
+
+**与 §2.2 的关系（易误读，特此澄清）**：本节动的是 **rerank 请求的 theme 白名单**，与 §2.2 冻结的 `PLACE_THEMES` / `CITY_THEMES` **词条内容、增删、顺序**完全是两回事。字段名里都带 theme，但互不影响；本节操作**不构成**对 §2.2 的违反。
+
+**成本提醒**：启用后 rerank 请求量增加（实测单候选耗时 92s → 270s），可接受但需计入时间预算。
+
+**落地限制（重要）**：`RAG_RERANK_DEFAULTS` 里**没有** `allThemes` / `extraThemes` 字段 → 该维度**只能 CLI 覆盖，无法持久化**。若最终最优解依赖它，落地方式二选一，由用户在报告中拍板：
+
+1. 走 §6 常规路径 —— 在 `RAG_RERANK_DEFAULTS` **新增** `allThemes: true`（或扩写 `highRiskThemes` 白名单），属结构性改动，需用户单独确认；
+2. 不落地为默认值，仅在报告中记为「可选增强」，保持默认参数不动。
 
 ### 2.2 严格禁止动的一层
 
@@ -300,6 +323,7 @@ B1 能力位只到检索层 + facts 层，**本轮不渲染 HTML**，报告中�
 | 本轮是否渲染 HTML | 不渲染 | B1 能力位不含呈现层 |
 | 「明确更优」的量化门槛 | R2 不降 + 读取量降 ≥10% 或信息密度提升 ≥10% / 新增 ≥3 条 | 用户选择「必须明确优于基线」并给出 10% 示例 |
 | 每轮参数写入方式 | CLI 覆盖优先，无入口的临时改+还原 | 最小化对源文件的侵入 |
+| rerank 主题启用范围是否纳入搜索 | **纳入，且为必搜维度**（`--rerank-all-themes` / `--rerank-theme <theme>`） | P2 实测有效（候选 F2），属 L4 层已有 CLI 入口，零侵入；详见 §2.1.1 |
 
 ---
 
@@ -315,7 +339,7 @@ B1 能力位只到检索层 + facts 层，**本轮不渲染 HTML**，报告中�
 | Q6 | 调参决策权 | Agent 自主决策，连续跑完再交最优解 |
 | Q7 | adjudications 裁定 | Agent 代裁定 + 在报告中标注供抽查 |
 | Q8 | facts 层重跑策略 | 用户授权 agent 决定 → 采纳两阶段漏斗 |
-| Q9 | rerank 用法 | 主动纳入搜索（开关、阈值、候选窗口都搜） |
+| Q9 | rerank 用法 | 主动纳入搜索（开关、阈值、候选窗口都搜） ｜ **2026-09-20 追加：主题启用范围（`--rerank-all-themes` / `--rerank-theme`）同样纳入**，见 §2.1.1 |
 | Q10 | 降权系数写入方式 | 临时改文件 + 强制还原 |
 | Q11 | 「调到更好」看哪一头 | 两个都看：省着读不退化 + 拿到定量有效新增 |
 | Q12 | 停止条件 | 收敛即停（连续 2 轮无候选超过当前最优） |
@@ -337,7 +361,7 @@ B1 能力位只到检索层 + facts 层，**本轮不渲染 HTML**，报告中�
 | 第 1 层「配额」 | `RAG_RETRIEVAL_DEFAULTS.placeMaxThemeChunks` / `cityMaxThemeChunks` / `maxPlaceChunks` / `maxCityChunks` |
 | 第 2 层「主题词表」 | `PLACE_THEMES` / `CITY_THEMES`（本轮冻结） |
 | 第 3 层「降权系数」 | `RAG_SCORING.videoTilt` / `defaultCityTilt` / `cityTiltByTheme` / `cityTierThemes` |
-| 第 4 层「rerank」 | `RAG_RERANK_DEFAULTS.enabled` / `probThreshold` / `recallWidth` |
+| 第 4 层「rerank」 | `RAG_RERANK_DEFAULTS.enabled` / `probThreshold` / `recallWidth`；主题启用范围 = `highRiskThemes` / `allThemes` / `extraThemes`（§2.1.1） |
 | 阅读池 | `retrieval-workspace.json` |
 | 第 2 段（重读） | agent 读阅读池 → facts-patch → `facts-workspace.json` |
 

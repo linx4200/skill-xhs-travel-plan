@@ -124,7 +124,7 @@ node scripts/rag/create_retrieval_workspace.mjs \
 ```
 
 - rerank 服务地址、模型和超时可通过 `--rerank-url`、`--rerank-model`、`--rerank-timeout-ms` 或环境变量 `RAG_RERANK_URL`、`RAG_RERANK_MODEL`、`RAG_RERANK_TIMEOUT_MS` 覆盖。`--rerank-recall-width` 必须大于等于本次 `topK`，`--rerank-threshold` 必须在 `[0, 1]` 内。
-- 默认 rerank 范围只覆盖景点 `highlights`、`nearby`、`facilities` 和城市 `backup_places`。调参时可用 `--rerank-theme <theme>` 扩展白名单，或用 `--rerank-all-themes` 覆盖全部 theme。
+- 默认 rerank 范围只覆盖景点 `highlights`、`nearby`、`routes`、`facilities` 和城市 `backup_places`（见 `RAG_RERANK_DEFAULTS.highRiskThemes`）。调参时可用 `--rerank-theme <theme>` 扩展白名单，或用 `--rerank-all-themes` 覆盖全部 theme。
 - 启用 rerank 后，`retrieval-workspace.json` 仍是轻量阅读索引，不写入 rerank 概率、软降权乘子或最终内部排序分。需要查看概率、过滤原因和耗时时，追加 `--log <工作目录>/retrieval-log.json`。
 - 如果 rerank URL 是 `localhost`、`127.0.0.1` 或 `::1`，运行环境需要能访问用户宿主机 loopback 端口；在受限环境中直接请求相应权限，不用先让命令失败。
 - 显式启用 `--rerank` 后，rerank API 不可用、超时或返回非法结果时流程应报错停止，不静默降级为无 rerank。只有用户同意降级时，才移除 `--rerank` 重新生成。
