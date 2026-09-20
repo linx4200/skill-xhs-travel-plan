@@ -101,7 +101,13 @@ export const RAG_RERANK_DEFAULTS = {
   enabled: false,
   url: "http://127.0.0.1:11435/rerank",
   model: "onnx-community/Qwen3-Reranker-0.6B-ONNX",
-  recallWidth: 12,
+
+  // 候选窗口宽度：每个命中 theme 送入 rerank 的候选条数。
+  // 2026-09-20 由 12 上调至 24（P2 自动调参结论，见 assessment/rag-tuning/rounds/P2-2026-09-20/P2-TUNING-REPORT.md）：
+  // 窗口 12 会把初排落在 13-24 位、但确实该读的 chunk 挡在窗口外；扩至 24 后
+  // R1 0.7797→0.8644、R2 0.8136→0.8870，而读取量只 +1.2%（82→83）。
+  // 注意：并非越大越好 —— 24→30→56 会反向退化，不要在没有实测的前提下继续上调。
+  recallWidth: 24,
   probThreshold: 0.9,
   probThresholdByTheme: {
     place: {

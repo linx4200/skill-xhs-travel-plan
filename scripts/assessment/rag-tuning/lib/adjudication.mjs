@@ -10,7 +10,7 @@ export function createAdjudicationSkeleton(runId, factsEvaluation) {
     target_name: item.target_name,
     theme: item.theme,
     criticality: item.criticality,
-    current_assessment: "covered_low_confidence",
+    current_assessment: item.current_assessment ?? "covered_low_confidence",
     reason: item.reason,
     matched_hints: item.matched_hints,
   }));

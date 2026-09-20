@@ -93,7 +93,16 @@ test("evaluateFactsLayer separates covered, low-confidence, facts_drop, and retr
   const lowConfidence = result.item_results.find((item) => item.item_id === "core-low-confidence");
   assert.equal(lowConfidence.covered, true);
   assert.equal(lowConfidence.confidence, "low");
-  assert.equal(result.adjudication_needed.length, 1);
+
+  // 裁定队列必须同时覆盖低置信命中与未覆盖但已召回两类条目；
+  // 检索层未召回的条目不得进入 facts 裁定队列（归因留在检索层）。
+  assert.deepEqual(
+    result.adjudication_needed.map((item) => [item.item_id, item.current_assessment]),
+    [
+      ["core-low-confidence", "covered_low_confidence"],
+      ["critical-facts-drop", "uncovered_needs_review"],
+    ],
+  );
 
   assert.deepEqual(
     result.lost_items.map((item) => item.item_id),

@@ -1,0 +1,550 @@
+{
+  "schema_version": 1,
+  "stage": "P2 阶段A（仅检索层，零 LLM 成本）",
+  "baseline_t0": {
+    "pool": 82,
+    "R1": 0.7797,
+    "R2": 0.8136,
+    "R1_lost": 13,
+    "R2_lost": 33,
+    "ref": 29,
+    "params": {
+      "place_top_k": 5,
+      "city_top_k": 5,
+      "max_place_chunks": 50,
+      "max_city_chunks": 25,
+      "rerank": true,
+      "rerank_recall_width": 12,
+      "rerank_threshold": 0.9,
+      "rerank_all_themes": false
+    }
+  },
+  "read_window_for_1_3": {
+    "lo": 73.8,
+    "hi": 90.2,
+    "note": "§1.3 增密型的「读取量级不变」窗口：基线 82 条 → [73.8, 90.2]"
+  },
+  "candidates": [
+    {
+      "id": "t0-baseline",
+      "group": "基线",
+      "note": "基线-t0（默认参数）",
+      "params": {
+        "place_top_k": 5,
+        "city_top_k": 5,
+        "max_place_chunks": 50,
+        "max_city_chunks": 25,
+        "rerank": true,
+        "rerank_recall_width": 12,
+        "rerank_threshold": 0.9,
+        "rerank_all_themes": false
+      },
+      "pool": 82,
+      "read_delta_vs_t0": 0,
+      "ref_in_pool": 29,
+      "R1": 0.7797,
+      "R2": 0.8136,
+      "R2_lost": 33,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 27,
+        "score_low": 1,
+        "unknown": 5
+      },
+      "verdict": "→ 增密型待验（M1/M2/M3）",
+      "in_read_window": null
+    },
+    {
+      "id": "A1-topk8-cap80",
+      "group": "A",
+      "note": "抬 top-k8 + 帽80/40",
+      "params": {
+        "place_top_k": 8,
+        "city_top_k": 4,
+        "max_place_chunks": 80,
+        "max_city_chunks": 40,
+        "rerank": true,
+        "rerank_recall_width": 12,
+        "rerank_threshold": 0.9
+      },
+      "pool": 101,
+      "read_delta_vs_t0": 0.2317,
+      "ref_in_pool": 32,
+      "R1": 0.8644,
+      "R2": 0.8814,
+      "R2_lost": 21,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 17,
+        "score_low": 1,
+        "unknown": 3
+      },
+      "verdict": "✗ 读量越界",
+      "in_read_window": false
+    },
+    {
+      "id": "A2-topk10-cap100",
+      "group": "A",
+      "note": "抬 top-k10 + 帽100/50",
+      "params": {
+        "place_top_k": 10,
+        "city_top_k": 5,
+        "max_place_chunks": 100,
+        "max_city_chunks": 50,
+        "rerank": true,
+        "rerank_recall_width": 12,
+        "rerank_threshold": 0.9
+      },
+      "pool": 107,
+      "read_delta_vs_t0": 0.3049,
+      "ref_in_pool": 32,
+      "R1": 0.8644,
+      "R2": 0.8814,
+      "R2_lost": 21,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 13,
+        "score_low": 5,
+        "unknown": 3
+      },
+      "verdict": "✗ 读量越界",
+      "in_read_window": false
+    },
+    {
+      "id": "A3-rr080",
+      "group": "A",
+      "note": "只降 rerank 阈值 0.80",
+      "params": {
+        "rerank_threshold": 0.8
+      },
+      "pool": 82,
+      "read_delta_vs_t0": 0,
+      "ref_in_pool": 29,
+      "R1": 0.7797,
+      "R2": 0.8136,
+      "R2_lost": 33,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 27,
+        "score_low": 1,
+        "unknown": 5
+      },
+      "verdict": "→ 增密型待验（M1/M2/M3）",
+      "in_read_window": null
+    },
+    {
+      "id": "A4-rr070",
+      "group": "A",
+      "note": "只降 rerank 阈值 0.70",
+      "params": {
+        "rerank_threshold": 0.7
+      },
+      "pool": 82,
+      "read_delta_vs_t0": 0,
+      "ref_in_pool": 29,
+      "R1": 0.7797,
+      "R2": 0.8136,
+      "R2_lost": 33,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 27,
+        "score_low": 1,
+        "unknown": 5
+      },
+      "verdict": "→ 增密型待验（M1/M2/M3）",
+      "in_read_window": null
+    },
+    {
+      "id": "A5-rw16",
+      "group": "A",
+      "note": "只抬 rerank 窗 16",
+      "params": {
+        "rerank_recall_width": 16
+      },
+      "pool": 83,
+      "read_delta_vs_t0": 0.0122,
+      "ref_in_pool": 30,
+      "R1": 0.8136,
+      "R2": 0.8531,
+      "R2_lost": 26,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 21,
+        "score_low": 1,
+        "unknown": 4
+      },
+      "verdict": "→ 增密型待验（M1/M2/M3）",
+      "in_read_window": true
+    },
+    {
+      "id": "A6-tighten",
+      "group": "A",
+      "note": "收紧 top-k4 + 帽40/20",
+      "params": {
+        "place_top_k": 5,
+        "city_top_k": 3,
+        "max_place_chunks": 30,
+        "max_city_chunks": 15,
+        "rerank_recall_width": 16
+      },
+      "pool": 72,
+      "read_delta_vs_t0": -0.122,
+      "ref_in_pool": 26,
+      "R1": 0.7288,
+      "R2": 0.791,
+      "R2_lost": 37,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 29,
+        "score_low": 2,
+        "unknown": 6
+      },
+      "verdict": "✗ R2 < 基线",
+      "in_read_window": false
+    },
+    {
+      "id": "A7-topk8-rr080",
+      "group": "A",
+      "note": "抬配额 + 阈值0.80",
+      "params": {
+        "place_top_k": 8,
+        "rerank_threshold": 0.8
+      },
+      "pool": 100,
+      "read_delta_vs_t0": 0.2195,
+      "ref_in_pool": 32,
+      "R1": 0.8644,
+      "R2": 0.8814,
+      "R2_lost": 21,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 17,
+        "score_low": 1,
+        "unknown": 3
+      },
+      "verdict": "✗ 读量越界",
+      "in_read_window": false
+    },
+    {
+      "id": "A8-topk8-rr070-rw16",
+      "group": "A",
+      "note": "抬配额 + 阈值0.70 + 窗16",
+      "params": {
+        "place_top_k": 8,
+        "rerank_threshold": 0.7,
+        "rerank_recall_width": 16
+      },
+      "pool": 104,
+      "read_delta_vs_t0": 0.2683,
+      "ref_in_pool": 32,
+      "R1": 0.8644,
+      "R2": 0.8814,
+      "R2_lost": 21,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 17,
+        "score_low": 1,
+        "unknown": 3
+      },
+      "verdict": "✗ 读量越界",
+      "in_read_window": false
+    },
+    {
+      "id": "C0-topk8-nocap",
+      "group": "A",
+      "note": "对照：只抬 top-k 不动帽",
+      "params": {
+        "place_top_k": 8,
+        "max_place_chunks": 999,
+        "max_city_chunks": 999
+      },
+      "pool": 101,
+      "read_delta_vs_t0": 0.2317,
+      "ref_in_pool": 32,
+      "R1": 0.8644,
+      "R2": 0.8814,
+      "R2_lost": 21,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 17,
+        "score_low": 1,
+        "unknown": 3
+      },
+      "verdict": "✗ 读量越界",
+      "in_read_window": null
+    },
+    {
+      "id": "F1-tk5-allTh-rw12",
+      "group": "F",
+      "note": "基线配额 + 全主题 rerank rw12",
+      "params": {
+        "rerank_all_themes": true,
+        "rerank_recall_width": 12
+      },
+      "pool": 78,
+      "read_delta_vs_t0": -0.0488,
+      "ref_in_pool": 29,
+      "R1": 0.8136,
+      "R2": 0.8079,
+      "R2_lost": 34,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 21,
+        "score_low": 5,
+        "rerank_drop": 2,
+        "unknown": 6
+      },
+      "verdict": "✗ R2 < 基线",
+      "in_read_window": null,
+      "secs": 168.1
+    },
+    {
+      "id": "F2-tk5-allTh-rw24",
+      "group": "F",
+      "note": "基线配额 + 全主题 rerank rw24",
+      "params": {
+        "rerank_all_themes": true,
+        "rerank_recall_width": 24
+      },
+      "pool": 67,
+      "read_delta_vs_t0": -0.1829,
+      "ref_in_pool": 30,
+      "R1": 0.8983,
+      "R2": 0.8362,
+      "R2_lost": 29,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 17,
+        "score_low": 6,
+        "rerank_drop": 2,
+        "unknown": 4
+      },
+      "verdict": "✅ 省读型（读量 -18.3%）",
+      "in_read_window": null,
+      "secs": 269.8
+    },
+    {
+      "id": "F3-tk5-rw24-noall",
+      "group": "F",
+      "note": "对照：基线配额 + rw24（不开全主题）",
+      "params": {
+        "rerank_all_themes": false,
+        "rerank_recall_width": 24
+      },
+      "pool": 83,
+      "read_delta_vs_t0": 0.0122,
+      "ref_in_pool": 31,
+      "R1": 0.8644,
+      "R2": 0.887,
+      "R2_lost": 20,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 16,
+        "score_low": 1,
+        "unknown": 3
+      },
+      "verdict": "→ 增密型待验（M1/M2/M3）",
+      "in_read_window": null,
+      "secs": 92.4
+    },
+    {
+      "id": "F4-tk6-allTh-rw24",
+      "group": "F",
+      "note": "tk6 + 全主题 rerank rw24",
+      "params": {
+        "place_top_k": 6,
+        "rerank_all_themes": true,
+        "rerank_recall_width": 24
+      },
+      "pool": 76,
+      "read_delta_vs_t0": -0.0732,
+      "ref_in_pool": 31,
+      "R1": 0.8983,
+      "R2": 0.8531,
+      "R2_lost": 26,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 15,
+        "score_low": 5,
+        "rerank_drop": 2,
+        "unknown": 4
+      },
+      "verdict": "→ 增密型待验（M1/M2/M3）",
+      "in_read_window": null,
+      "secs": 282.6
+    },
+    {
+      "id": "F5-tk5-allTh-rw24-tilt0",
+      "group": "F",
+      "note": "基线配额 + 全主题 rw24 + L3 降权归零",
+      "params": {
+        "rerank_all_themes": true,
+        "rerank_recall_width": 24,
+        "L3_tilt_zeroed": true
+      },
+      "pool": 70,
+      "read_delta_vs_t0": -0.1463,
+      "ref_in_pool": 29,
+      "R1": 0.7288,
+      "R2": 0.7458,
+      "R2_lost": 45,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 18,
+        "score_low": 11,
+        "rerank_drop": 4,
+        "unknown": 12
+      },
+      "verdict": "✗ R2 < 基线",
+      "in_read_window": null,
+      "secs": 281.6
+    },
+    {
+      "id": "D1-allTh-rw12",
+      "group": "D",
+      "note": "全主题rerank（窗12 阈0.90）",
+      "params": {
+        "rerank_all_themes": true,
+        "rerank_recall_width": 12
+      },
+      "pool": 98,
+      "ref_in_pool": null,
+      "read_delta_vs_t0": 0.1951,
+      "R1": 0.8644,
+      "R2": 0.8701,
+      "R2_lost": 23,
+      "attribution": {
+        "topk_cut": 18,
+        "score_low": 1,
+        "rerank_drop": 1,
+        "unknown": 3
+      },
+      "secs": 163.2,
+      "verdict": null
+    },
+    {
+      "id": "D2-allTh-rw30",
+      "group": "D",
+      "note": "全主题rerank + 窗30",
+      "params": {
+        "rerank_all_themes": true,
+        "rerank_recall_width": 30
+      },
+      "pool": 93,
+      "ref_in_pool": null,
+      "read_delta_vs_t0": 0.1341,
+      "R1": 0.9153,
+      "R2": 0.8588,
+      "R2_lost": 25,
+      "attribution": {
+        "topk_cut": 15,
+        "score_low": 4,
+        "rerank_drop": 2,
+        "unknown": 4
+      },
+      "secs": 323,
+      "verdict": null
+    },
+    {
+      "id": "G1-tk5-allTh-rw24-t080",
+      "group": "G",
+      "note": "全主题 rw24 阈0.80",
+      "params": {
+        "rerank_all_themes": true,
+        "rerank_recall_width": 24,
+        "rerank_threshold": 0.8
+      },
+      "pool": 68,
+      "ref_in_pool": 30,
+      "read_delta_vs_t0": -0.1707,
+      "R1": 0.8983,
+      "R2": 0.8362,
+      "R2_lost": 29,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 17,
+        "score_low": 6,
+        "rerank_drop": 2,
+        "unknown": 4
+      },
+      "secs": 300.9,
+      "verdict": null
+    },
+    {
+      "id": "G2-tk5-allTh-rw24-t070",
+      "group": "G",
+      "note": "全主题 rw24 阈0.70",
+      "params": {
+        "rerank_all_themes": true,
+        "rerank_recall_width": 24,
+        "rerank_threshold": 0.7
+      },
+      "pool": 68,
+      "ref_in_pool": 30,
+      "read_delta_vs_t0": -0.1707,
+      "R1": 0.8983,
+      "R2": 0.8362,
+      "R2_lost": 29,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 17,
+        "score_low": 6,
+        "rerank_drop": 2,
+        "unknown": 4
+      },
+      "secs": 275.4,
+      "verdict": null
+    },
+    {
+      "id": "G3-tk6-allTh-rw24-t080",
+      "group": "G",
+      "note": "tk6 + 全主题 rw24 阈0.80",
+      "params": {
+        "place_top_k": 6,
+        "rerank_all_themes": true,
+        "rerank_recall_width": 24,
+        "rerank_threshold": 0.8
+      },
+      "pool": 76,
+      "ref_in_pool": 31,
+      "read_delta_vs_t0": -0.0732,
+      "R1": 0.8983,
+      "R2": 0.8531,
+      "R2_lost": 26,
+      "CIR_lost": 0,
+      "attribution": {
+        "topk_cut": 15,
+        "score_low": 5,
+        "rerank_drop": 2,
+        "unknown": 4
+      },
+      "secs": 304.3,
+      "verdict": null
+    },
+    {
+      "id": "G4-tk5-allTh-rw56-t080",
+      "group": "G",
+      "note": "全主题 rw56 阈0.80（覆盖组C深层名次 42/55）",
+      "params": {
+        "rerank_all_themes": true,
+        "rerank_recall_width": 56,
+        "rerank_threshold": 0.8
+      },
+      "pool": 62,
+      "ref_in_pool": 28,
+      "read_delta_vs_t0": -0.2439,
+      "R1": 0.8305,
+      "R2": 0.8249,
+      "R2_lost": 31,
+      "CIR_lost": 0,
+      "attribution": {
+        "score_low": 9,
+        "rerank_drop": 2,
+        "topk_cut": 13,
+        "unknown": 7
+      },
+      "secs": 663.9,
+      "verdict": null
+    }
+  ]
+}

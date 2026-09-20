@@ -6,7 +6,7 @@ import { applyCoverageOverrides, createAdjudicationSkeleton } from "./lib/adjudi
 import { evaluateFactsLayer } from "./lib/facts_metrics.mjs";
 import { evaluateHtmlLayer } from "./lib/html_metrics.mjs";
 import { evaluateRetrievalLayer } from "./lib/retrieval_metrics.mjs";
-import { createDeltas, createNewItemDeltas, createReport, writeAssessmentOutputs } from "./lib/report_writer.mjs";
+import { computeNewItemEffect, createDeltas, createNewItemDeltas, createReport, writeAssessmentOutputs } from "./lib/report_writer.mjs";
 import { assertValidAdjudications, assertValidChecklist, assertValidRunManifest } from "./lib/schemas.mjs";
 
 function parseArgs(argv) {
@@ -104,7 +104,16 @@ export function evaluateAssessmentRun({ baselinePath, runDir, htmlDir = "", adju
   const adjudications = existingAdjudications
     ?? writeAdjudicationSkeletonIfMissing(resolvedRunDir, runManifest.run_id, factsEvaluation, htmlEvaluation, resolvedAdjudicationsPath);
   const newItems = createNewItemDeltas({ checklist, facts, retrievalWorkspace, runManifest });
-  const deltas = createDeltas({ checklist, runId: runManifest.run_id, retrievalEvaluation, factsEvaluation, htmlEvaluation, newItems });
+  const newItemEffect = computeNewItemEffect({ checklist, newItems, retrievalWorkspace });
+  const deltas = createDeltas({
+    checklist,
+    runId: runManifest.run_id,
+    retrievalEvaluation,
+    factsEvaluation,
+    htmlEvaluation,
+    newItems,
+    newItemEffect,
+  });
   const report = createReport({
     checklist,
     runManifest,

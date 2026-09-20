@@ -119,7 +119,7 @@ node scripts/rag/create_retrieval_workspace.mjs \
   -o <工作目录>/retrieval-workspace.json \
   --rerank \
   --rerank-url http://127.0.0.1:11435/rerank \
-  --rerank-recall-width 12 \
+  --rerank-recall-width 24 \
   --rerank-threshold 0.9
 ```
 
@@ -134,6 +134,7 @@ Rerank 诊断与调参：
 - rerank 概率只作为主题相关性闸门，不作为同主题 top-N 精排事实依据。`retrieval-workspace.json` 中的 `score` 仍是常规相关性分，agent 不得把 rerank 概率写入 facts。
 - rerank 阈值过滤后，某个 theme 可以少于 `topK` 条，甚至为空。theme 为空不自动等同于“材料没有这类信息”；涉及关键执行字段时，先用 `--log` 生成诊断，再看 `requests[].rerank.items[]` 的概率分布、`passed_threshold`、`out_of_window_count`。需要核对候选正文时，用 `scripts/rag/rag_retrieve.mjs` 对同一 target/theme 做不带 `--rerank` 的单点补检索，不直接打开 `rag-index.json`。
 - 调参按固定顺序一次只动一个变量：先看概率分布并调整 `--rerank-threshold`；只有 `out_of_window_count > 0` 且窗口末位概率仍高于阈值时，才扩大 `--rerank-recall-width`；只有窗口内内容确实相关但整体低分时，才考虑修改 `RAG_RERANK_DEFAULTS.queryTemplates`。
+- 默认窗口宽度已于 2026-09-20 由 12 上调为 24。在该主题词表与语料上，窗口 12 会挡掉初排 13-24 位、但确实该读的 chunk；扩到 24 后关键段落命中 R1 提升约 10.9%、整体命中 R2 提升约 9.0%，读取量只 +1.2%。继续上调（30、56）会反向退化，再动这个值前必须实测。
 - 非白名单 theme 正常记录为 `skipped_reason: "theme_not_in_scope"`，不会调用 rerank 服务。不要把这种跳过当成服务失败。
 
 ## Step 5：填充第一版 Facts Workspace

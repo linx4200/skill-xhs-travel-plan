@@ -227,14 +227,31 @@ export function evaluateFactsLayer(checklist, facts, retrievalEvaluation = null)
     },
     item_results: results,
     lost_items: factsDrops.map((result) => factsDropDelta(asList(checklist?.items).find((item) => item.id === result.item_id), result)),
-    adjudication_needed: lowConfidence.map((result) => ({
-      item_id: result.item_id,
-      target_type: result.target_type,
-      target_name: result.target_name,
-      theme: result.theme,
-      criticality: result.criticality,
-      reason: result.reason,
-      matched_hints: result.matched_hints,
-    })),
+    // 裁定队列覆盖两类条目：
+    // 1. covered_low_confidence：低置信命中，需要人工/agent 复核正向判定是否成立。
+    // 2. uncovered_needs_review：字符串匹配未通过但已进入阅读池的条目。覆盖判定本质是语义判断，
+    //    概括类、转述类条目无法靠字面匹配可靠判定，必须交给裁定通道，不能直接计入丢失。
+    adjudication_needed: [
+      ...lowConfidence.map((result) => ({
+        item_id: result.item_id,
+        target_type: result.target_type,
+        target_name: result.target_name,
+        theme: result.theme,
+        criticality: result.criticality,
+        current_assessment: "covered_low_confidence",
+        reason: result.reason,
+        matched_hints: result.matched_hints,
+      })),
+      ...factsDrops.map((result) => ({
+        item_id: result.item_id,
+        target_type: result.target_type,
+        target_name: result.target_name,
+        theme: result.theme,
+        criticality: result.criticality,
+        current_assessment: "uncovered_needs_review",
+        reason: result.reason,
+        matched_hints: result.matched_hints,
+      })),
+    ],
   };
 }

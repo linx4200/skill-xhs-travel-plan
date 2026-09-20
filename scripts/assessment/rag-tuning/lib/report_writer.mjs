@@ -43,6 +43,92 @@ function candidateAlreadyCovered(candidate, baselineItems) {
   });
 }
 
+function groupKeyOf(item) {
+  return [item?.target_type, item?.target_name ?? "", item?.theme].join("|");
+}
+
+/** 冷冻基准清单实际引用过的 chunk 集合。 */
+function baselineUsedChunkIds(baselineItems) {
+  const ids = new Set();
+  for (const item of asList(baselineItems)) {
+    for (const id of asList(item?.source_chunk_ids)) ids.add(id);
+  }
+  return ids;
+}
+
+/** 阅读池（retrieval-workspace.json）中出现的全部 chunk id。 */
+function workspaceChunkIds(retrievalWorkspace) {
+  const ids = new Set();
+  const visit = (group) => {
+    for (const target of Object.values(group ?? {})) {
+      for (const entries of Object.values(target?.themes ?? {})) {
+        for (const entry of asList(entries)) {
+          const id = typeof entry === "string" ? entry : entry?.chunk_id;
+          if (id) ids.add(id);
+        }
+      }
+      for (const id of asList(target?.unique_chunk_ids)) if (id) ids.add(id);
+    }
+  };
+  visit(retrievalWorkspace?.places);
+  visit(retrievalWorkspace?.cities);
+  return ids;
+}
+
+/**
+ * 逐 (target_type, target_name, theme) 分组统计「证据新颖度」。
+ *
+ * 证据是分组级的（同组内候选共享同一组 chunk id），因此以分组为聚合单位天然免疫
+ * 「基准条目粒度粗于生成粒度」导致的条数虚增：把一条基准拆成 3 条候选，chunk 集合不变。
+ */
+function groupNovelty(newItems, baselineItems) {
+  const used = baselineUsedChunkIds(baselineItems);
+  const byGroup = new Map();
+  const allGroups = new Set();
+  for (const item of asList(newItems)) {
+    const key = groupKeyOf(item);
+    allGroups.add(key);
+    for (const id of asList(item?.evidence?.source_chunk_ids)) {
+      if (used.has(id)) continue;
+      if (!byGroup.has(key)) byGroup.set(key, new Set());
+      byGroup.get(key).add(id);
+    }
+  }
+  return { used, byGroup, allGroups };
+}
+
+/**
+ * M3「有效新增」的度量块。
+ *
+ * 度量单位是**证据 chunk**，不是「条」。原因：基准 checklist 是粗粒度摘要，生成层按字段
+ * 展开，二者粒度不可通约；而「某条候选是否携带基准没有的新事实」需要阅读理解，任何词面
+ * 或向量比较都无法可靠判定（实测：字符 bigram、整段命中、embedding 余弦三种方法均无法
+ * 区分真实重复与真实新增，已知重复项与已知新增项得分重叠）。
+ */
+export function computeNewItemEffect({ checklist, newItems, retrievalWorkspace }) {
+  const baselineItems = asList(checklist?.items);
+  const baselineGroups = new Set(baselineItems.map(groupKeyOf));
+  const { used, byGroup, allGroups } = groupNovelty(newItems, baselineItems);
+
+  const novelEvidence = new Set();
+  for (const ids of byGroup.values()) for (const id of ids) novelEvidence.add(id);
+  const pool = workspaceChunkIds(retrievalWorkspace);
+  const items = asList(newItems);
+
+  return {
+    unit: "evidence_chunk",
+    candidate_groups: allGroups.size,
+    novel_evidence_chunks: novelEvidence.size,
+    novel_evidence_groups: byGroup.size,
+    new_topic_groups: [...allGroups].filter((key) => !baselineGroups.has(key)).length,
+    read_pool_chunks: pool.size,
+    novel_pool_chunks: [...pool].filter((id) => !used.has(id)).length,
+    baseline_used_chunks: used.size,
+    raw_candidate_items: items.length,
+    effective_new_items: items.filter((item) => byGroup.has(groupKeyOf(item))).length,
+  };
+}
+
 function gate(status, summary, details = {}) {
   return { status, summary, ...details };
 }
@@ -107,10 +193,23 @@ export function createNewItemDeltas({ checklist, facts, retrievalWorkspace, runM
       effective_new: true,
     });
   }
+  // effective_new 以「该分组是否带来基准未使用过的证据」为准，不再恒为 true。
+  const { byGroup } = groupNovelty(candidates, baselineItems);
+  for (const candidate of candidates) {
+    candidate.effective_new = byGroup.has(groupKeyOf(candidate));
+  }
   return candidates;
 }
 
-export function createDeltas({ checklist, runId, retrievalEvaluation, factsEvaluation, htmlEvaluation, newItems = [] }) {
+export function createDeltas({
+  checklist,
+  runId,
+  retrievalEvaluation,
+  factsEvaluation,
+  htmlEvaluation,
+  newItems = [],
+  newItemEffect = null,
+}) {
   const deltas = {
     schema_version: 1,
     baseline_id: checklist.baseline_id,
@@ -125,6 +224,7 @@ export function createDeltas({ checklist, runId, retrievalEvaluation, factsEvalu
     unsupported_facts: [],
     duplicates: [],
     attribution: asList(retrievalEvaluation?.attribution),
+    new_item_effect: newItemEffect,
   };
   assertValidDeltas(deltas);
   return deltas;
@@ -177,6 +277,7 @@ export function createReport({
       retrieval: retrievalEvaluation.metrics,
       facts: factsEvaluation.metrics,
       html: htmlEvaluation.metrics,
+      M3: deltas.new_item_effect ?? null,
       deltas: {
         lost_items: asList(deltas.lost_items).length,
         new_items: asList(deltas.new_items).length,
@@ -232,16 +333,33 @@ export function renderReportMarkdown(report, deltas) {
     ]),
   ];
   const newRows = [
-    ["候选", "主题", "目标", "证据 chunk", "判定"],
+    ["候选", "主题", "目标", "证据 chunk", "证据判定"],
     ["---", "---", "---", "---", "---"],
     ...asList(deltas.new_items).slice(0, 20).map((item) => [
       item.item_id,
       item.theme,
       `${item.target_type}:${item.target_name ?? ""}`,
       asList(item.evidence?.source_chunk_ids).join(", "),
-      item.effective_new ? "有效新增候选" : "待复查",
+      item.effective_new ? "该分组含基准未使用的证据" : "证据已被基准用过",
     ]),
   ];
+  const m3 = report.metrics.M3;
+  const m3Rows = m3
+    ? [
+        ["指标", "值"],
+        ["---", "---"],
+        ["度量单位", m3.unit],
+        ["候选分组数 (target×theme)", m3.candidate_groups],
+        ["新增证据 chunk 数", m3.novel_evidence_chunks],
+        ["含新增证据的分组数", `${m3.novel_evidence_groups} / ${m3.candidate_groups}`],
+        ["基准无对应分组的全新覆盖数", m3.new_topic_groups],
+        ["阅读池 chunk 数", m3.read_pool_chunks],
+        ["阅读池中基准未使用 chunk 数", m3.novel_pool_chunks],
+        ["基准已使用 chunk 数", m3.baseline_used_chunks],
+        ["原始候选条数（诊断，粒度不齐不可计分）", m3.raw_candidate_items],
+        ["有效新增条数（诊断，粒度不齐不可计分）", m3.effective_new_items],
+      ]
+    : null;
   const metricRows = [
     ["指标", "值"],
     ["---", "---"],
@@ -267,6 +385,10 @@ export function renderReportMarkdown(report, deltas) {
     "## 核心指标",
     "",
     markdownTable(metricRows),
+    "",
+    "## M3 有效新增（证据单位）",
+    "",
+    ...(m3Rows ? [markdownTable(m3Rows)] : ["- N/A（未提供 retrieval workspace，M3 未计算）"]),
     "",
     "## Notes",
     "",
