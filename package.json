@@ -17,6 +17,11 @@
     "rag:workspace": "node scripts/rag/create_retrieval_workspace.mjs",
     "render": "node scripts/render_travel_html.mjs",
     "verify": "node scripts/verify_output.mjs",
+    "assessment:params": "node scripts/assessment/rag-tuning/lib/params_snapshot.mjs",
+    "assessment:prepare": "node scripts/assessment/rag-tuning/prepare_run.mjs",
+    "assessment:baseline": "node scripts/assessment/rag-tuning/build_baseline_checklist.mjs",
+    "assessment:evaluate": "node scripts/assessment/rag-tuning/evaluate_run.mjs",
+    "assessment:upgrade": "node scripts/assessment/rag-tuning/upgrade_baseline.mjs",
     "test": "node --test"
   },
   "dependencies": {
