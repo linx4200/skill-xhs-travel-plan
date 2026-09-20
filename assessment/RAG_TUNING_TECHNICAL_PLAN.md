@@ -488,6 +488,14 @@ test/assessment/
 - 能校验 checklist、run、delta、report、adjudication 的基本结构。
 - 能从 `rag_retrieval_config.mjs` 生成完整 `params.json`。
 
+执行状态：
+
+- 已完成。
+- 已交付 `scripts/assessment/rag-tuning/lib/schemas.mjs`、`scripts/assessment/rag-tuning/lib/params_snapshot.mjs`、`scripts/assessment/rag-tuning/prepare_run.mjs`。
+- 已在 `package.json` 增加 `assessment:params`、`assessment:prepare`、`assessment:baseline`、`assessment:evaluate`、`assessment:upgrade`。
+- 已增加 `test/assessment/schemas.test.mjs` 和 `test/assessment/params_snapshot.test.mjs`。
+- `npm test` 已通过。
+
 ### Phase 2：基准清单构建
 
 交付物：
@@ -504,6 +512,16 @@ test/assessment/
 - 每个正式条目都包含 `criticality`、`source_chunk_ids`、`evidence_ref`。
 - evidence access 只按 chunk id 取证据。
 
+执行状态：
+
+- 已完成。
+- 已交付 `scripts/assessment/rag-tuning/build_baseline_checklist.mjs`、`scripts/assessment/rag-tuning/lib/checklist.mjs`、`scripts/assessment/rag-tuning/lib/evidence_access.mjs`。
+- 已增加 `test/assessment/checklist.test.mjs` 和 `test/assessment/evidence_access.test.mjs`。
+- 已生成 `assessment/rag-tuning/baselines/B1-rag-e2e-smoke.checklist.json`，当前 0 条。原因是 `output/rag-e2e-smoke/facts-workspace.json` 仍是 skeleton，尚无已整理事实。
+- 已生成 `assessment/rag-tuning/baselines/B2-20260907.checklist.json`，共 248 条，其中 `critical` 97 条、`core-quality` 108 条、`mid` 28 条、`low` 15 条；按目标层级为 place 141 条、city 55 条、day 47 条、global 5 条。
+- B2 目录没有本地 `rag-index.json`，基准清单使用 `retrieval-workspace.json` 的 `chunks_by_id` 作为受控证据来源；访问方式仍限制为按 chunk id 读取。
+- `npm test` 已通过。
+
 ### Phase 3：检索层评估与归因
 
 交付物：
@@ -517,6 +535,18 @@ test/assessment/
 - 能计算 CIR、R1、R2、R3、R4。
 - 能区分 `keyword_miss`、`score_low`、`topk_cut`、`quota_dropped`、`rerank_drop`。
 - 缺少 `retrieval-log.json` 时进入降级评估。
+
+执行状态：
+
+- 已完成。
+- 已交付 `scripts/assessment/rag-tuning/lib/attribution.mjs` 和 `scripts/assessment/rag-tuning/lib/retrieval_metrics.mjs`。
+- 已增加 `test/assessment/attribution.test.mjs` 和 `test/assessment/retrieval_metrics.test.mjs`。
+- `attribution.mjs` 已支持 `keyword_miss`、`score_low`、`topk_cut`、`quota_dropped`、`rerank_drop`、`unknown`；已召回状态使用内部码 `theme_selected`、`target_selected`、`log_selected`，不会写入丢失归因分布。
+- `retrieval_metrics.mjs` 已输出 `CIR`、`R1`、`R2`、`R3`、`R4`、`item_results`、`lost_items` 和 `attribution`，其中 `lost_items` / `attribution` 的结构可被后续 `deltas.json` 复用。
+- day/global 条目的 source chunk 没有直接 retrieval target 时，只要 chunk 已在 `retrieval-workspace.json.chunks_by_id` 中存在，即视为进入阅读池，避免 B2 这类全量基准误报。
+- 缺少 `retrieval-log.json` 时 `degraded_attribution: true`，保留召回结果，但完整参数归因只能输出 `unknown`。
+- 使用 `B2-20260907.checklist.json` + `outputs/2026-guoqing-self-drive-plan-20260907/retrieval-workspace.json` 做过烟测：`CIR=1`、`R1=1`、`R2=1`、`R3.empty_theme_count=0`、`lost_items=0`，同时因缺少 retrieval log 标记为降级归因。
+- `npm test` 已通过。
 
 ### Phase 4：资料整理层评估
 
@@ -533,6 +563,18 @@ test/assessment/
 - 能生成低置信 adjudication 待办。
 - 能识别 `facts_drop`。
 
+执行状态：
+
+- 已完成。
+- 已交付 `scripts/assessment/rag-tuning/lib/facts_metrics.mjs` 和 `scripts/assessment/rag-tuning/lib/adjudication.mjs`。
+- 已增加 `test/assessment/facts_metrics.test.mjs` 和 `test/assessment/adjudication.test.mjs`。
+- `facts_metrics.mjs` 已支持 place、city、day、global target 的 facts 文本展开；覆盖判断分为 `high`、`low`、`none`，其中低置信覆盖会进入 `adjudication_needed`。
+- facts 层已输出 `CIR`、`N1`、`N2`、`N3`、`N7`、`low_confidence_count`、`facts_drop_count`、`retrieved_facts_drop_count`、`item_results`、`lost_items` 和 `adjudication_needed`。
+- `facts_drop` 只用于检索层已召回或检索状态未知但 facts 未覆盖的条目；检索层明确未召回的条目不在 facts 层重复归因。
+- `adjudication.mjs` 已支持生成裁定骨架和应用 `coverage_overrides` 更新 facts 覆盖结果与 critical 指标。
+- 使用 `B2-20260907.checklist.json` + `outputs/2026-guoqing-self-drive-plan-20260907/facts-workspace.json` 做过烟测：`CIR=1`、`N1.critical_lost=0`、`N2.noncritical_lost=0`、`facts_drop_count=0`、`adjudication_needed=0`。
+- `npm test` 已通过。
+
 ### Phase 5：呈现层评估
 
 交付物：
@@ -546,6 +588,20 @@ test/assessment/
 - HTML 存在时能校验链接、图片、本地资源和 index。
 - HTML 缺失时呈现层为 `N/A`。
 - facts 覆盖但 HTML 未出现时标记 `render_drop`。
+
+执行状态：
+
+- 已完成。
+- 已交付 `scripts/assessment/rag-tuning/lib/html_metrics.mjs`。
+- 已增加 `test/assessment/html_metrics.test.mjs`。
+- `html_metrics.mjs` 已复用 `scripts/verify_output.mjs` 的 `verifyOutput(outDir)` 做 G1 机械校验，覆盖 `index.html`、本地链接、图片资源和远程资源检查。
+- HTML 缺失时返回 `status: "N/A"`，`mechanical.status: "N/A"`，呈现层指标不参与内容失败。
+- HTML 存在时会抽取全站纯文本，并只检查 facts 层已覆盖的 checklist 条目；facts 层未覆盖的条目不在呈现层重复归因。
+- facts 覆盖但 HTML 未呈现的条目会输出 `render_drop`，并进入 `lost_items`。
+- 已输出呈现层 `CIR`、`N3`、`N8`、`render_drop_count`、`low_confidence_count`、`item_results`、`lost_items` 和 `adjudication_needed`。
+- 页面归位和重复展示目前保留为后续报告整合阶段的扩展点；当前版本先完成全站呈现覆盖和机械校验。
+- 使用 `B2-20260907.checklist.json` + `outputs/2026-guoqing-self-drive-plan-20260907/` 做过烟测：机械校验 `PASS`、`CIR=1`、`N8.structure_complete=true`、`html_file_count=10`、`render_drop_count=0`。
+- `npm test` 已通过。
 
 ### Phase 6：评估运行与报告生成
 
