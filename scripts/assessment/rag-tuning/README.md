@@ -49,6 +49,60 @@ npm run assessment:evaluate -- \
 - `deltas.json`：丢失项、新增候选、归位错误、越界事实和归因。
 - `adjudications.json`：低置信覆盖和语义评分的人工裁定骨架。
 
+## Rerank A/B 全评
+
+Rerank A/B 全评用于比较同一组读取配额下，关闭 rerank 与开启 rerank 对检索层、facts 层和可选 HTML 呈现层的影响。
+
+严格全评模式传入两侧各自的 `facts-workspace.json`：
+
+```bash
+npm run assessment:rerank-ab -- \
+  --baseline assessment/rag-tuning/baselines/B2-20260907.checklist.json \
+  --rag-index outputs/<批次>/rag-index.json \
+  --no-rerank-facts outputs/<no-rerank批次>/facts-workspace.json \
+  --rerank-facts outputs/<rerank批次>/facts-workspace.json \
+  --no-rerank-html-dir outputs/<no-rerank批次> \
+  --rerank-html-dir outputs/<rerank批次> \
+  --out-dir assessment/rag-tuning/runs/<run_id>-rerank-ab
+```
+
+快照对照模式可以只传一份 `--facts`。此时脚本仍会生成两套 retrieval workspace、retrieval log 和评估报告，但 facts 层共用同一份输入，只能作为一致性参考：
+
+```bash
+npm run assessment:rerank-ab -- \
+  --baseline assessment/rag-tuning/baselines/B1-rag-e2e-smoke.checklist.json \
+  --rag-index output/rag-expanded-baseline/rag-index.json \
+  --facts output/rag-expanded-baseline/facts-workspace.json
+```
+
+可选参数与 `rag:workspace` 保持一致：
+
+- 读取配额：`--read-scope`、`--place-top-k`、`--city-top-k`、`--max-place-chunks`、`--max-city-chunks`
+- embedding：`--embedding-url`、`--embedding-model`、`--no-embedding`
+- rerank：`--rerank-url`、`--rerank-model`、`--rerank-all-themes`、`--rerank-theme`、`--rerank-recall-width`、`--rerank-threshold`、`--rerank-timeout-ms`
+
+输出目录：
+
+```text
+assessment/rag-tuning/runs/<run_id>-rerank-ab/
+├── no-rerank/
+│   ├── retrieval-workspace.json
+│   ├── retrieval-log.json
+│   ├── run.json
+│   ├── report.json
+│   └── report.md
+├── rerank/
+│   ├── retrieval-workspace.json
+│   ├── retrieval-log.json
+│   ├── run.json
+│   ├── report.json
+│   └── report.md
+├── comparison.json
+└── comparison.md
+```
+
+`comparison.md` 固定输出核心对比表：结论、阅读池 chunk 数、R1、R2、R3 空主题数、facts critical 丢失、facts noncritical 丢失、lost_items、M3 新增证据 chunk 和 rerank 日志统计。
+
 ## 天花板评估（`capability: ceiling`）
 
 B3 是**天花板基准**（各批次优点的并集），用来当**调参目标函数**，不是验收线。

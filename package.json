@@ -21,6 +21,7 @@
     "assessment:prepare": "node scripts/assessment/rag-tuning/prepare_run.mjs",
     "assessment:baseline": "node scripts/assessment/rag-tuning/build_baseline_checklist.mjs",
     "assessment:evaluate": "node scripts/assessment/rag-tuning/evaluate_run.mjs",
+    "assessment:rerank-ab": "node scripts/assessment/rag-tuning/compare_rerank_ab.mjs",
     "assessment:upgrade": "node scripts/assessment/rag-tuning/upgrade_baseline.mjs",
     "test": "node --test",
     "assessment:ceiling": "node scripts/assessment/rag-tuning/build_ceiling_baseline.mjs --coverage assessment/rag-tuning/baselines/B3-ceiling.coverage.md --out assessment/rag-tuning/baselines/B3-ceiling.checklist.json",

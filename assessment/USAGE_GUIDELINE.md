@@ -27,6 +27,7 @@ npm run assessment:upgrade
 | 里程碑全评 | 准备 B2 run 并传入 HTML 目录后执行评估 | 快评输入 + HTML 输出目录 | 完整三层评估报告 | 用于候选参数收敛、发布前检查和基准升级前检查 |
 | 代码回归检查 | 复用对应基准执行快评或全评 | 与被检查能力位匹配的 run 输入 | 新 run 报告 | 用于确认 RAG 代码改动没有破坏满意基准 |
 | 人工裁定 | 编辑 run 目录中的 `adjudications.json` 后重跑评估 | `adjudications.json` | 更新后的报告 | 用于确认低置信覆盖、语义评分和误判项 |
+| Rerank A/B 全评 | 执行 rerank 开关对照并汇总两侧报告 | `rag-index.json`、两侧 `facts-workspace.json`、可选两侧 HTML 目录 | `comparison.md`、`comparison.json`、两侧完整 run 报告 | 用于判断 rerank 对检索、facts 和呈现指标的净影响 |
 | 基准升级 | 从 `PASS` run 中接受有效新增项 | `report.json`、`deltas.json`、原 checklist | 新版本 checklist、CHANGELOG 记录 | 用于把稳定更好的信息点追加进基准 |
 | 建立新基准 | 从满意产物生成 checklist | `facts-workspace.json`、证据来源 | 新 checklist | 用于新增能力位或新增固定评估样本 |
 
@@ -141,6 +142,29 @@ npm run assessment:evaluate -- \
 - `PASS`：当前产物达到完整基准要求，可作为候选参数或基准升级来源。
 - `PASS_WITH_NOTES`：硬门槛通过，但需要处理非关键丢失、低置信裁定或语义评分不足。
 - `FAIL`：不要升级基准；先根据 `deltas.json` 和 `report.md` 定位问题层级。
+
+## 6.1 Rerank A/B 全评流程
+
+Rerank A/B 全评用于比较同一读取配置下 `rerank=false` 与 `rerank=true` 的完整评估结果。严格全评使用两侧各自的 facts 产物和 HTML 产物：
+
+```bash
+npm run assessment:rerank-ab -- \
+  --baseline assessment/rag-tuning/baselines/B2-20260907.checklist.json \
+  --rag-index outputs/<批次>/rag-index.json \
+  --no-rerank-facts outputs/<no-rerank批次>/facts-workspace.json \
+  --rerank-facts outputs/<rerank批次>/facts-workspace.json \
+  --no-rerank-html-dir outputs/<no-rerank批次> \
+  --rerank-html-dir outputs/<rerank批次> \
+  --out-dir assessment/rag-tuning/runs/<run_id>-rerank-ab
+```
+
+输出：
+
+- `comparison.md`：面向人工阅读的 A/B 指标表。
+- `comparison.json`：机器可读的两侧 summary、差值和 verdict。
+- `no-rerank/report.json` 与 `rerank/report.json`：两侧完整 assessment 结果。
+
+只传一份 `--facts` 时，脚本生成两套 retrieval workspace 并共用同一份 facts。该模式只用于快速观察 rerank 的检索层影响；facts 层指标不作为 rerank 开关的独立效果。
 
 ## 7. 参数快照
 
