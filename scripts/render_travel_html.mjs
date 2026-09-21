@@ -302,6 +302,21 @@ function prepareCity(name, data, resourceRoot, outDir) {
 }
 
 /**
+ * 城市页不重复展示已经出现在路线景点页的照片。
+ */
+function routePlacePhotoSet(facts) {
+  const photos = new Set();
+  for (const place of Object.values(facts.places ?? {})) {
+    for (const photo of asList(place.photos ?? [])) photos.add(textOf(photo));
+  }
+  return photos;
+}
+
+function photosNotInSet(photos, excludedPhotos) {
+  return asList(photos).filter((photo) => !excludedPhotos.has(textOf(photo)));
+}
+
+/**
  * 执行完整渲染流程：复制 CSS、生成首页、每日页、城市页和照片资源。
  */
 function render(facts, outDir, skillRoot) {
@@ -323,9 +338,11 @@ function render(facts, outDir, skillRoot) {
     const html = renderTemplate(skillRoot, "day.ejs", prepareDay(day, facts, resourceRoot, outDir, days.length));
     fs.writeFileSync(path.join(outDir, filename), html, "utf8");
   });
+  const usedPlacePhotos = routePlacePhotoSet(facts);
   includedCities(facts).forEach(([city, data], index) => {
     const filename = `city-${String(index + 1).padStart(2, "0")}.html`;
-    fs.writeFileSync(path.join(outDir, filename), renderTemplate(skillRoot, "city.ejs", prepareCity(city, data, resourceRoot, outDir)), "utf8");
+    const cityData = { ...data, photos: photosNotInSet(data.photos ?? [], usedPlacePhotos) };
+    fs.writeFileSync(path.join(outDir, filename), renderTemplate(skillRoot, "city.ejs", prepareCity(city, cityData, resourceRoot, outDir)), "utf8");
   });
 }
 

@@ -204,3 +204,120 @@ test("RAG rendered HTML copies photos from photo_resource_root", () => {
   const html = fs.readFileSync(path.join(outDir, "day-01.html"), "utf8");
   assert.match(html, /assets\/photos\/A%E5%9C%B0%E6%96%B9\/01\.jpg|assets\/photos\/A地方\/01\.jpg/);
 });
+
+test("facts workspace does not duplicate route place photos into city photos", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "city-photo-dedupe-"));
+  fs.mkdirSync(path.join(tmp, "chunks"), { recursive: true });
+  fs.mkdirSync(path.join(tmp, "photos", "盐津"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "photos", "盐津", "old-town.jpg"), "");
+
+  const ragIndexPath = path.join(tmp, "rag-index.json");
+  fs.writeFileSync(
+    ragIndexPath,
+    `${JSON.stringify({
+      schema_version: 1,
+      source_chunks: "chunks",
+      chunks: [
+        {
+          chunk_id: "yanjin-place",
+          source_uri: "resources/yanjin.md",
+          title: "盐津攻略",
+          text: "盐津老县城适合短逛。",
+          candidate_places: ["盐津老县城"],
+          candidate_cities: ["盐津"],
+          embedding: [],
+        },
+      ],
+    })}\n`,
+  );
+
+  const routePath = path.join(tmp, "route-structure.json");
+  fs.writeFileSync(
+    routePath,
+    `${JSON.stringify({
+      title: "测试路线",
+      mode: "self_drive",
+      cities: ["盐津"],
+      days: [{ day: 1, title: "盐津老县城", route_places: ["盐津老县城"] }],
+    })}\n`,
+  );
+
+  const factsPath = path.join(tmp, "facts-workspace.json");
+  execFileSync(
+    process.execPath,
+    [
+      path.join(skillRoot, "scripts", "create_fact_workspace.mjs"),
+      "--route-json",
+      routePath,
+      "--rag-index",
+      ragIndexPath,
+      "-o",
+      factsPath,
+    ],
+    { cwd: skillRoot },
+  );
+
+  const facts = JSON.parse(fs.readFileSync(factsPath, "utf8"));
+  assert.deepEqual(facts.places["盐津老县城"].photos, ["photos/盐津/old-town.jpg"]);
+  assert.deepEqual(facts.cities["盐津"].photos, []);
+});
+
+test("rendered city pages skip photos already used by route places", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "city-render-photo-dedupe-"));
+  fs.mkdirSync(path.join(tmp, "photos", "盐津"), { recursive: true });
+  fs.writeFileSync(path.join(tmp, "photos", "盐津", "old-town.jpg"), "fake image bytes");
+  fs.writeFileSync(path.join(tmp, "photos", "盐津", "city-only.jpg"), "fake city image bytes");
+
+  const factsPath = path.join(tmp, "facts-workspace.json");
+  fs.writeFileSync(
+    factsPath,
+    `${JSON.stringify(
+      {
+        schema_version: 1,
+        needs_agent_review: false,
+        title: "测试路线",
+        source: {
+          resource_root: tmp,
+          resource_index: "resource-index.json",
+          route_structure: "route-structure.json",
+        },
+        trip: {
+          mode: "self_drive",
+          days: [{ day: 1, title: "盐津老县城", route_places: ["盐津老县城"], summary: "去盐津老县城。" }],
+        },
+        places: {
+          盐津老县城: {
+            summary: "盐津老县城适合短逛。",
+            photos: ["photos/盐津/old-town.jpg"],
+          },
+        },
+        cities: {
+          盐津: {
+            include: true,
+            summary: "盐津适合短停。",
+            overview: ["盐津是返程短停城市。"],
+            photos: ["photos/盐津/old-town.jpg", "photos/盐津/city-only.jpg"],
+          },
+        },
+        global_notes: [],
+        confirm_before_departure: [],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const outDir = path.join(tmp, "out");
+  execFileSync(
+    process.execPath,
+    [path.join(skillRoot, "scripts", "render_travel_html.mjs"), factsPath, "-o", outDir],
+    { cwd: skillRoot },
+  );
+
+  const cityHtml = fs.readFileSync(path.join(outDir, "city-01.html"), "utf8");
+  assert.doesNotMatch(cityHtml, /old-town\.jpg/);
+  assert.match(cityHtml, /city-only\.jpg/);
+  assert.equal(fs.existsSync(path.join(outDir, "assets", "photos", "盐津老县城", "old-town.jpg")), true);
+  assert.equal(fs.existsSync(path.join(outDir, "assets", "photos", "盐津", "city-only.jpg")), true);
+  assert.equal(fs.existsSync(path.join(outDir, "assets", "photos", "盐津", "old-town.jpg")), false);
+});

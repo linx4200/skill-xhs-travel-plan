@@ -169,3 +169,4 @@ Agent 填 facts 时按字段优先读取 `themes.<theme>[]` 的 chunk_id，再�
 - `source.photo_resource_root` 应记录输入 `rag-index.json` 所在目录，渲染脚本用它定位同级 `photos/` 下的本地照片。
 - `places.*.source_files` 和 `cities.*.source_files` 来自命中 chunk 的 `source_uri` / `path`，只作为内部来源线索和调试口径，不表示必须回读原始文本。
 - `photos` 由 `create_fact_workspace.mjs --rag-index` 直接扫描输入的 `rag-index.json` 同级 `photos/` 的目录名、文件名和路径后按地点名或别名归属。该字段不保存图片 OCR、视觉摘要或其他画面解析结果。
+- 照片归属按路线景点优先。`create_fact_workspace.mjs --rag-index` 会先为 `places.<路线地点>.photos` 归属照片，再从 `cities.<城市名>.photos` 中排除这些已使用照片；渲染城市页时也会再次跳过已被路线景点使用的照片，避免同一张照片在景点页和城市页重复展示。

@@ -260,6 +260,14 @@ function photosForCity(index, city) {
 }
 
 /**
+ * 城市页照片只展示城市级增量素材；已经归入路线景点的照片不在城市页重复展示。
+ */
+function excludePhotos(photos, excludedPhotos) {
+  const excluded = new Set(excludedPhotos);
+  return uniqueStrings(photos).filter((photo) => !excluded.has(photo));
+}
+
+/**
  * 构建 facts-workspace.json 的初始结构；只创建空槽位，不自动生成攻略事实。
  */
 function buildFacts(index, routeStructure) {
@@ -286,6 +294,7 @@ function buildFacts(index, routeStructure) {
       source_files: filesForPlace(index, place),
     };
   }
+  const routePlacePhotos = Object.values(placeFacts).flatMap((place) => place.photos ?? []);
 
   const cityFacts = {};
   for (const city of uniqueStrings(asList(routeStructure.cities))) {
@@ -302,7 +311,7 @@ function buildFacts(index, routeStructure) {
       transport: [],
       shopping: [],
       notes: [],
-      photos: photosForCity(index, city),
+      photos: excludePhotos(photosForCity(index, city), routePlacePhotos),
       source_files: filesForCity(index, city),
     };
   }
