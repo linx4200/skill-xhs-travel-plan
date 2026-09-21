@@ -267,3 +267,100 @@ test("computeCeilingCoverage tolerates a missing render layer", () => {
   assert.equal(coverage.gaps.by_layer.render, 0, "无 HTML 时不应凭空造出呈现层缺口");
   assert.equal(coverage.gaps.total, 2);
 });
+
+/**
+ * 检索层 chunk 粒度口径（2026-09-21 新增）。
+ *
+ * 动机：条目级覆盖率在索引够丰富时饱和（任一条证据入池即算命中），无法给参数排序。
+ * 这个 fixture 刻意让「条目级」全为 100%、「chunk 级」不满，验证两者确实不同源。
+ *
+ * | 条目 | 权重 | 证据 | 入池 | 条目级 | 部分分 | 全证据 |
+ * |------|------|------|------|--------|--------|--------|
+ * | A    | 4    | 2    | 2    | ✓      | 1.0    | ✓      |
+ * | B    | 3    | 2    | 1    | ✓      | 0.5    | ✗      |
+ * | C    | 2    | 1    | 0    | ✗      | 0      | ✗      |
+ * | D    | 1    | 1    | 1    | ✓      | 1.0    | ✓      |
+ */
+function chunkLevelRetrievalEvaluation() {
+  const item = (item_id, criticality, retrievedChunkIds, missingChunkIds) => ({
+    item_id,
+    criticality,
+    retrieved: retrievedChunkIds.length > 0,
+    source_chunk_count: retrievedChunkIds.length + missingChunkIds.length,
+    retrieved_chunk_ids: retrievedChunkIds,
+    missing_chunk_ids: missingChunkIds,
+    chunk_results: [],
+  });
+  return {
+    metrics: { CIR: { lost: 0 } },
+    item_results: [
+      item("A", "critical", ["c-a1", "c-a2"], []),
+      item("B", "core-quality", ["c-b1"], ["c-b2"]),
+      item("C", "mid", [], ["c-c1"]),
+      item("D", "low", ["c-d1"], []),
+    ],
+    lost_items: [],
+    attribution: [],
+  };
+}
+
+test("ceiling chunk-level retrieval metrics coexist with saturated item-level coverage", () => {
+  const checklist = ceilingChecklist();
+  const coverage = computeCeilingCoverage({
+    checklist,
+    retrievalEvaluation: chunkLevelRetrievalEvaluation(),
+    factsEvaluation: null,
+    htmlEvaluation: { status: "N/A", item_results: [] },
+  });
+  const level = coverage.layers.retrieval.chunk_level;
+
+  assert.equal(level.unit, "evidence_chunk");
+  assert.equal(level.source, "attribution", "未提供阅读池时回退为归属口径，并如实标注");
+  // 6 条证据去重后 4 条入池。
+  assert.deepEqual(level.unique_evidence_chunks, { total: 6, retrieved: 4, rate: 0.6667 });
+  // critical 证据 2/2。
+  assert.deepEqual(level.unique_critical_evidence_chunks, { total: 2, retrieved: 2, rate: 1 });
+  // 部分分：(4*1 + 3*0.5 + 2*0 + 1*1) / 10 = 6.5 / 10。
+  assert.equal(level.partial_credit_weighted_rate, 0.65);
+  // facts 可写上界：只有 A、D 证据全入池，(4 + 1) / 10。
+  assert.equal(level.fully_evidenced_weighted_rate, 0.5);
+});
+
+test("ceiling chunk-level metrics prefer reading-pool membership over attribution", () => {
+  const checklist = ceilingChecklist();
+  // 阅读池里有 c-c1（条目 C 判未召回），但没有 c-b2（条目 B 缺的那条）。
+  const retrievalWorkspace = { chunks_by_id: { "c-a1": {}, "c-a2": {}, "c-b1": {}, "c-c1": {}, "c-d1": {} } };
+  const coverage = computeCeilingCoverage({
+    checklist,
+    retrievalEvaluation: chunkLevelRetrievalEvaluation(),
+    factsEvaluation: null,
+    htmlEvaluation: { status: "N/A", item_results: [] },
+    retrievalWorkspace,
+  });
+  const level = coverage.layers.retrieval.chunk_level;
+
+  assert.equal(level.source, "reading_pool");
+  // 池里有 5 条（c-c1 也算），只有 c-b2 不在池里。
+  assert.deepEqual(level.unique_evidence_chunks, { total: 6, retrieved: 5, rate: 0.8333 });
+  // 部分分：(4*1 + 3*0.5 + 2*1 + 1*1) / 10 = 8.5 / 10。
+  assert.equal(level.partial_credit_weighted_rate, 0.85);
+  // 可写上界不变（C 仍缺 c-c1？不 —— c-c1 在池里，故 C 也全证据）：(4 + 2 + 1) / 10。
+  assert.equal(level.fully_evidenced_weighted_rate, 0.7);
+});
+
+test("ceiling chunk-level block is null-safe and rendered only in ceiling reports", () => {
+  const checklist = ceilingChecklist();
+  // 完全没有 item_results 时不应抛错，也不应编造分母。
+  const empty = computeCeilingCoverage({
+    checklist,
+    retrievalEvaluation: { item_results: [] },
+    factsEvaluation: null,
+    htmlEvaluation: { status: "N/A", item_results: [] },
+  });
+  assert.equal(empty.layers.retrieval.chunk_level, null);
+
+  const { report, deltas } = buildCeilingReport();
+  const markdown = renderReportMarkdown(report, deltas);
+  assert.match(markdown, /### 检索层 chunk 粒度/);
+  assert.match(markdown, /facts 层可写上界/);
+});

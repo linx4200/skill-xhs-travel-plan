@@ -18,3 +18,8 @@
 - 新增 `capability: "ceiling"` 评估分支：Gate 全部 `SKIPPED`（数值保留）、`conclusion` 取 `CEILING`、
   判据改为 `report.coverage`（分层覆盖率 + 层内转化 + 按 criticality 权重的缺口清单）。
   非 ceiling 基准的 report 结构逐字段不变。新增 `test/assessment/ceiling_report.test.mjs`（8 条）。
+- 新增读取档位 `RAG_READ_PROFILES` 与 CLI `--read-scope default|wide`，把 P3 天花板口径下的
+  配额组落成显式可选档。**`default` 档数字一字未动**（仍 5/5/50/25，默认行为零变化，
+  已用 `output/rag-expanded-baseline/` 复现逐字节核对）；四个原子配额参数仍可覆盖档位值，
+  非法档名报错不静默回退。输出的 `retrieval.read_scope` 记录生效档位。
+  §1.3 判据**未修订** —— 可选档不进默认值判定。见 `rounds/P3-2026-09-20/B1-RECHECK.md` §5。

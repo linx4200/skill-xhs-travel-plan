@@ -74,6 +74,31 @@ node scripts/rag/create_retrieval_workspace.mjs \
   -o <工作目录>/retrieval-workspace.json
 ```
 
+### 读取档位（可选）
+
+`--read-scope` 一次性预设四个配额，避免调用方手记数字。档位只是批量默认值：四个原子参数（`--place-top-k`、`--city-top-k`、`--max-place-chunks`、`--max-city-chunks`）仍然可用，且优先级高于档位 —— 显式传了哪个就只覆盖哪一个。
+
+| 档位 | 每主题条数（景点 / 城市） | 单 target 池上限（景点 / 城市） | 适用场景 |
+|---|---|---|---|
+| `default`（不传时的默认） | 5 / 5 | 50 / 25 | 常规生成，省读优先 |
+| `wide` | 10 / 10 | 100 / 50 | 用户明确要求「多读一点」「尽量多读」「材料尽量都看一遍」「别省 token」 |
+
+`wide` 在本项目 B1 基准上的实测（4 个 target）：阅读池 82 → 110 条 chunk（+34.1%），新增正文约 3.5k token；R1 0.7797→0.9153、R2 0.8136→0.9153，facts 层 N1/N2 不退化。完整数据见 `assessment/rag-tuning/rounds/P3-2026-09-20/B1-RECHECK.md`。
+
+`wide` 只做显式可选档，没有设成默认值：读量 +34.1% 超出落地判据中「读量不涨」的要求。因此**不要**在没有用户明确要求时自行传 `--read-scope wide`。
+
+```bash
+node scripts/rag/create_retrieval_workspace.mjs \
+  --facts <工作目录>/facts-workspace.json \
+  --rag-index <rag-index.json> \
+  -o <工作目录>/retrieval-workspace.json \
+  --read-scope wide
+```
+
+⚠️ 用 `wide` 时必须同步加宽 Step 5 的 facts 整理范围。读进来但没写进 `facts-workspace.json` 的证据等于白花 token，还会让攻略缺失材料其实覆盖到的信息。整理 facts 时要覆盖扩展后的整个阅读池，不要只写 `default` 档会命中的那些条目。
+
+档位名非法（例如 `--read-scope full`）会直接报错停止，不会静默回退到 `default`。本次实际生效的档位记录在输出 `retrieval.read_scope`，可用它对账。
+
 Embedding 配置规则：
 
 - RAG 检索使用真实 embedding API。优先使用当前 shell 环境中的 `RAG_EMBEDDING_URL`、`RAG_EMBEDDING_MODEL`。

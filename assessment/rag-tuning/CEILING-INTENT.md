@@ -223,6 +223,33 @@
 | `weighted_coverage` | `(总权重 − 缺口权重) ÷ 总权重` | 整体离理想多远 |
 | `gaps.items[]` | 每条缺口**只记最上游那一层**（`first_missing_layer`），按权重降序 | 缺口清单 |
 
+#### 6.2.1 检索层 chunk 粒度口径（2026-09-21 新增，修订记录见 `rounds/P3-2026-09-20/LOG.md` §A3）
+
+**背景**：上面的 `layers.retrieval` 是**条目级**的 —— 一条条目只要有任意 1 条证据入池就算命中。
+在扩容后的 337-chunk 索引上它会**饱和**：8 个不同配额档位读数同为 `273 / 273`，
+无法给参数排序，直接违反本节事实 2「绝对值不是问题，**区分度**才是」。
+
+**新增字段**（只在天花板模式产出，非 ceiling 路径输出逐字段不变）：
+
+| 字段 | 定义 | 用途 |
+|---|---|---|
+| `layers.retrieval.chunk_level.source` | `reading_pool` \| `attribution` | 说明下面几个数字用的哪套「入池」语义 |
+| `unique_evidence_chunks` | 证据 chunk 去重后的入池数 / 总数 | **材料广度，跨参数组主排序依据** |
+| `unique_critical_evidence_chunks` | 同上，限 critical 条目 | 硬门槛面是否被撑住 |
+| `partial_credit_weighted_rate` | 逐条目按「已入池证据 ÷ 该条目全部证据」给部分分，再按 criticality 加权 | 容忍「只捞到部分证据」的中间态 |
+| `fully_evidenced_weighted_rate` | 证据**全部**入池的条目加权占比 | **facts 层可写上界**（见下） |
+
+**`fully_evidenced_weighted_rate` 的意义**：检索层是 facts 层的唯一上游，证据没进池的信息
+不可能被写对（写了就是幻觉、触发 G4）。这条给出「若 agent 读全池，facts 层最多能覆盖多少」，
+使检索层调参不必每轮都付一次长文阅读成本。
+
+**两套「入池」语义必须显式区分**：`reading_pool`（chunk 在 `chunks_by_id` 里，= agent 能读到）是
+天花板口径要的量；`attribution`（被它所属条目的目标/主题自己选中）是 B1/B2 的 CIR/N1/N2/Gate 用的
+**归属正确性**语义，**跨目标携带的 chunk 会被它判为未召回** —— 实测在 t0 上低估 unique 1 条、
+低估可写上界 **13.0 个百分点**（65.8% vs 78.8%），因此不能拿它当可写上界。
+`computeCeilingCoverage` / `createReport` 因此新增可选入参 `retrievalWorkspace`；
+拿不到阅读池时回退到 `attribution` 并在 `source` 字段如实标注。
+
 两条必须记住的口径事实：
 
 1. **`conditional` 不可省。** 只给无条件覆盖率时，facts 层没写的东西不可能出现在页面上，

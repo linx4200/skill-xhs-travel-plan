@@ -4,20 +4,50 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRagIndex, retrieve, writeRetrievalLog } from "./rag_retrieve.mjs";
 import { rerankThemeScope, resolveRerankConfig } from "./rag_rerank.mjs";
-import { CITY_THEMES, PLACE_THEMES, RAG_SCORING, RAG_RETRIEVAL_DEFAULTS } from "./rag_retrieval_config.mjs";
+import { CITY_THEMES, PLACE_THEMES, RAG_SCORING, RAG_RETRIEVAL_DEFAULTS, RAG_READ_PROFILE_DEFAULT, resolveReadProfile } from "./rag_retrieval_config.mjs";
+
+/**
+ * 解析本次运行的四个读取配额。
+ *
+ * 优先级：显式原子参数 > 读取档位 > 档位默认。档位只是批量预设，
+ * 显式传了某个原子参数就只覆盖那一个，其余仍取档位值。
+ *
+ * 档位名由 resolveReadProfile() 校验；未知档名抛错，不静默回退。
+ */
+export function resolveReadQuotas(options = {}) {
+  const profile = resolveReadProfile(options.readScope);
+  // 未传 → 用档位值；传了但非法 → 报错。
+  // 不把非法值静默换成档位值：那会让人以为参数生效了，实际跑的是另一套配额。
+  const pick = (explicit, fromProfile, flag) => {
+    if (explicit === undefined || explicit === null || explicit === "") return fromProfile;
+    const value = Number(explicit);
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`${flag} must be a positive number.`);
+    return value;
+  };
+  return {
+    read_scope: profile.name,
+    placeMaxThemeChunks: pick(options.placeTopK, profile.placeMaxThemeChunks, "--place-top-k"),
+    cityMaxThemeChunks: pick(options.cityTopK, profile.cityMaxThemeChunks, "--city-top-k"),
+    maxPlaceChunks: pick(options.maxPlaceChunks, profile.maxPlaceChunks, "--max-place-chunks"),
+    maxCityChunks: pick(options.maxCityChunks, profile.maxCityChunks, "--max-city-chunks"),
+  };
+}
 
 /**
  * 解析批量检索命令参数，读取 facts workspace、RAG index 和输出路径。
  */
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = {
     facts: "",
     ragIndex: "",
     out: "retrieval-workspace.json",
-    placeTopK: RAG_RETRIEVAL_DEFAULTS.placeMaxThemeChunks,
-    cityTopK: RAG_RETRIEVAL_DEFAULTS.cityMaxThemeChunks,
-    maxPlaceChunks: RAG_RETRIEVAL_DEFAULTS.maxPlaceChunks,
-    maxCityChunks: RAG_RETRIEVAL_DEFAULTS.maxCityChunks,
+    // 配额默认留空：先解析档位，再用档位值补齐，最后校验。
+    // 不能在这里填 RAG_RETRIEVAL_DEFAULTS 的值，否则档位永远被默认值遮住。
+    readScope: RAG_READ_PROFILE_DEFAULT,
+    placeTopK: undefined,
+    cityTopK: undefined,
+    maxPlaceChunks: undefined,
+    maxCityChunks: undefined,
     embeddingUrl: "",
     embeddingModel: "",
     noEmbedding: false,
@@ -37,6 +67,7 @@ function parseArgs(argv) {
     if (arg === "--facts") args.facts = argv[++i];
     else if (arg === "--rag-index") args.ragIndex = argv[++i];
     else if (arg === "-o" || arg === "--out") args.out = argv[++i];
+    else if (arg === "--read-scope") args.readScope = argv[++i];
     else if (arg === "--place-top-k") args.placeTopK = Number(argv[++i]);
     else if (arg === "--city-top-k") args.cityTopK = Number(argv[++i]);
     else if (arg === "--max-place-chunks") args.maxPlaceChunks = Number(argv[++i]);
@@ -58,14 +89,15 @@ function parseArgs(argv) {
 
   if (!args.facts) throw new Error("Missing required --facts <facts-workspace.json>.");
   if (!args.ragIndex) throw new Error("Missing required --rag-index <rag-index.json>.");
-  for (const [name, value] of Object.entries({
-    "--place-top-k": args.placeTopK,
-    "--city-top-k": args.cityTopK,
-    "--max-place-chunks": args.maxPlaceChunks,
-    "--max-city-chunks": args.maxCityChunks,
-  })) {
-    if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive number.`);
-  }
+
+  const quotas = resolveReadQuotas(args);
+  // 注意键名映射：args 里的原子参数叫 placeTopK / cityTopK，
+  // 而 quotas 返回的是语义名 placeMaxThemeChunks / cityMaxThemeChunks。
+  args.readScope = quotas.read_scope;
+  args.placeTopK = quotas.placeMaxThemeChunks;
+  args.cityTopK = quotas.cityMaxThemeChunks;
+  args.maxPlaceChunks = quotas.maxPlaceChunks;
+  args.maxCityChunks = quotas.maxCityChunks;
   return args;
 }
 
@@ -376,10 +408,8 @@ function retrievalLogDocument(workspace, requests) {
 export async function createRetrievalWorkspace(factsPath, ragIndexPath, options = {}) {
   const facts = readJson(factsPath);
   const index = loadRagIndex(ragIndexPath);
-  const placeMaxThemeChunks = Number(options.placeTopK ?? RAG_RETRIEVAL_DEFAULTS.placeMaxThemeChunks);
-  const cityMaxThemeChunks = Number(options.cityTopK ?? RAG_RETRIEVAL_DEFAULTS.cityMaxThemeChunks);
-  const maxPlaceChunks = Number(options.maxPlaceChunks ?? RAG_RETRIEVAL_DEFAULTS.maxPlaceChunks);
-  const maxCityChunks = Number(options.maxCityChunks ?? RAG_RETRIEVAL_DEFAULTS.maxCityChunks);
+  const quotas = resolveReadQuotas(options);
+  const { placeMaxThemeChunks, cityMaxThemeChunks, maxPlaceChunks, maxCityChunks } = quotas;
   const hasChunkEmbeddings = asList(index.chunks).some((chunk) => asList(chunk.embedding).length > 0);
   const usesEmbedding = hasChunkEmbeddings && !options.noEmbedding;
   const rerankOptions = rerankOptionsFromOptions(options);
@@ -449,6 +479,7 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
     retrieval: {
       place_themes: Object.keys(PLACE_THEMES),
       city_themes: Object.keys(CITY_THEMES),
+      read_scope: quotas.read_scope,
       place_top_k: placeMaxThemeChunks,
       city_top_k: cityMaxThemeChunks,
       max_place_chunks: maxPlaceChunks,
@@ -514,12 +545,15 @@ export async function createRetrievalWorkspace(factsPath, ragIndexPath, options 
 }
 
 /**
- * CLI 入口：生成文件并输出简短统计。
+ * 把 CLI 参数转成 createRetrievalWorkspace() 的 options。
+ *
+ * 单独抽出来是为了可测：这里漏字段会导致「档位在 CLI 上静默失效」——
+ * 例如只转发 maxPlaceChunks 而漏掉 placeTopK，会得到
+ * read_scope=default 但 max_place_chunks=100 的混杂配额。
  */
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  const logRequests = [];
-  const options = {
+export function retrievalOptionsFromArgs(args, logRequests = null) {
+  return {
+    readScope: args.readScope,
     placeTopK: args.placeTopK,
     cityTopK: args.cityTopK,
     maxPlaceChunks: args.maxPlaceChunks,
@@ -537,7 +571,15 @@ async function main() {
     rerankTimeoutMs: args.rerankTimeoutMs,
     logRequests: args.log ? logRequests : null,
   };
-  const workspace = await createRetrievalWorkspace(args.facts, args.ragIndex, options);
+}
+
+/**
+ * CLI 入口：生成文件并输出简短统计。
+ */
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const logRequests = [];
+  const workspace = await createRetrievalWorkspace(args.facts, args.ragIndex, retrievalOptionsFromArgs(args, logRequests));
   workspace.source.facts_workspace = relativeToOut(args.facts, args.out);
   workspace.source.rag_index = relativeToOut(args.ragIndex, args.out);
   if (args.log) workspace.source.retrieval_log = relativeToOut(args.log, args.out);

@@ -46,6 +46,7 @@ Agent 不直接读取 `rag-index.json`。需要校验时调用 `scripts/rag/vali
 - `source.rag_index`：本次检索使用的 RAG 索引路径。
 - `source.retrieval_log`：可选；仅在传入 `--log` 时存在。
 - `retrieval.place_themes`、`retrieval.city_themes`：默认检索主题，默认值来自 `scripts/rag/rag_retrieval_config.mjs`。
+- `retrieval.read_scope`：本次生效的读取档位名，`default` 或 `wide`。档位定义在 `scripts/rag/rag_retrieval_config.mjs` 的 `RAG_READ_PROFILES`；原子参数可以覆盖档位值，因此这个字段只表示档位来源，实际配额以 `place_top_k` / `max_place_chunks` 等字段为准。
 - `retrieval.place_top_k`、`retrieval.city_top_k`：每个主题保留的结果数量。
 - `retrieval.max_place_chunks`、`retrieval.max_city_chunks`：单个 target 跨主题去重后的最大阅读 chunk 数。
 - `retrieval.scoring`：检索排序策略说明，用于复现实验和调参。

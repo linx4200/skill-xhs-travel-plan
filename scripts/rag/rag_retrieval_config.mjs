@@ -57,25 +57,82 @@ export const RAG_SCORING = {
   },
 };
 
+/**
+ * 读取档位：用一次性的具名开关预设四个配额，避免调用方记四个数字。
+ *
+ * 档位只是「批量默认值」，不改变任何单参数语义：
+ * CLI 的四个原子参数（--place-top-k / --city-top-k / --max-place-chunks /
+ * --max-city-chunks）优先级高于档位，显式传参可以逐个覆盖档位值。
+ *
+ * ⚠️ `default` 是冻结基线档，数值必须与 2026-09 P2/P3 轮次完全一致。
+ * 改它会让 B1/B2 基线、评估报告和相关 reference 同时失效。
+ * 需要新的读取策略请新增 key，不要修改 `default`。
+ */
+export const RAG_READ_PROFILES = {
+  default: {
+    label: "标准",
+    placeMaxThemeChunks: 5,
+    cityMaxThemeChunks: 5,
+    maxPlaceChunks: 50,
+    maxCityChunks: 25,
+  },
+
+  // 广读档。取值来自 P3 天花板扫描后在 B1 上做的落地复核：
+  // 见 assessment/rag-tuning/rounds/P3-2026-09-20/B1-RECHECK.md。
+  // 实测（B1 基准 4 个 target）：阅读池 82 → 110 chunk，正文 token +3.5k 量级；
+  // R1 0.7797→0.9153、R2 0.8136→0.9153，facts N1/N2 不退化。
+  // 因为读量 +34.1% 超出 §1.3 的默认值门槛，它只作为显式可选档，不是默认值。
+  wide: {
+    label: "广读",
+    placeMaxThemeChunks: 10,
+    cityMaxThemeChunks: 10,
+    maxPlaceChunks: 100,
+    maxCityChunks: 50,
+  },
+};
+
+/** 未显式指定档位时使用的档位名。 */
+export const RAG_READ_PROFILE_DEFAULT = "default";
+
+/**
+ * 按名字解析读取档位。非法档名直接抛错，不做静默回退 —— 档位决定读量和 token 成本，
+ * 静默降级会让调用方以为自己在用 wide，实际跑的是 default。
+ */
+export function resolveReadProfile(name) {
+  const key = String(name ?? "").trim() || RAG_READ_PROFILE_DEFAULT;
+  const profile = RAG_READ_PROFILES[key];
+  if (!profile) {
+    throw new Error(
+      `Unknown --read-scope "${key}". Available: ${Object.keys(RAG_READ_PROFILES).join(", ")}.`,
+    );
+  }
+  return { name: key, ...profile };
+}
+
+const DEFAULT_READ_PROFILE = RAG_READ_PROFILES[RAG_READ_PROFILE_DEFAULT];
+
 export const RAG_RETRIEVAL_DEFAULTS = {
+  // 以下四个配额字段全部由 RAG_READ_PROFILES.default 派生，保持单一真源：
+  // 想改默认行为，改 RAG_READ_PROFILES.default，不要在这里写第二份数字。
+
   // 正式生成：每个景点的每个 theme 最多拿多少条 chunk。
   // 对应 CLI: --place-top-k；输出字段仍叫 retrieval.place_top_k。
-  placeMaxThemeChunks: 5,
+  placeMaxThemeChunks: DEFAULT_READ_PROFILE.placeMaxThemeChunks,
 
   // 正式生成：每个城市的每个 theme 最多拿多少条 chunk。
   // 对应 CLI: --city-top-k；输出字段仍叫 retrieval.city_top_k。
-  cityMaxThemeChunks: 5,
+  cityMaxThemeChunks: DEFAULT_READ_PROFILE.cityMaxThemeChunks,
 
   // 正式生成：一个景点所有 themes 合起来最多读多少条 chunk。
   // 对应 CLI: --max-place-chunks。
   // 默认值恰好等于 PLACE_THEMES 主题数 × placeMaxThemeChunks，所以默认不会触发名额丢弃。
   // 调大 placeMaxThemeChunks 或新增主题后，丢弃会从主题顺序末尾开始，需同步评估这个值。
-  maxPlaceChunks: 50,
+  maxPlaceChunks: DEFAULT_READ_PROFILE.maxPlaceChunks,
 
   // 正式生成：一个城市所有 themes 合起来最多读多少条 chunk。
   // 对应 CLI: --max-city-chunks。
   // 与 maxPlaceChunks 同理，默认值恰好等于 CITY_THEMES 主题数 × cityMaxThemeChunks。
-  maxCityChunks: 25,
+  maxCityChunks: DEFAULT_READ_PROFILE.maxCityChunks,
 
   // keyword_match 计分时最多按多少个命中词归一化；提高会让多词命中更难满分。
   keywordScoreTermCap: 6,

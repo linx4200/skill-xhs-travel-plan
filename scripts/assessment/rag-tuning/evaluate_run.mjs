@@ -118,6 +118,8 @@ export function evaluateAssessmentRun({ baselinePath, runDir, htmlDir = "", adju
     checklist,
     runManifest,
     retrievalEvaluation,
+    // 天花板模式要用阅读池做 chunk 粒度口径（见 report_writer 的 ceilingChunkLevel 注释）。
+    retrievalWorkspace,
     factsEvaluation,
     htmlEvaluation,
     adjudications,
@@ -156,6 +158,16 @@ function main() {
         `层内转化 facts ${inner(layers.facts)} / 呈现 ${inner(layers.render)}。`,
     );
     console.log(`缺口 ${gaps.total} 项（检索 ${gaps.by_layer.retrieval} / facts ${gaps.by_layer.facts} / 呈现 ${gaps.by_layer.render}）。`);
+    // 条目级检索覆盖率在索引够丰富时会饱和，跨参数组比较要看 chunk 粒度（见 report_writer 的注释）。
+    const chunk = layers.retrieval.chunk_level;
+    if (chunk) {
+      console.log(
+        `检索层 chunk 粒度（${chunk.source}）— ` +
+          `证据 ${chunk.unique_evidence_chunks.retrieved}/${chunk.unique_evidence_chunks.total}（${pct(chunk.unique_evidence_chunks.rate)}）；` +
+          `critical 证据 ${chunk.unique_critical_evidence_chunks.retrieved}/${chunk.unique_critical_evidence_chunks.total}；` +
+          `部分分加权 ${pct(chunk.partial_credit_weighted_rate)}；facts 可写上界 ${pct(chunk.fully_evidenced_weighted_rate)}。`,
+      );
+    }
   } else {
     console.log(`Assessment ${result.report.conclusion}: ${reportPath}`);
   }

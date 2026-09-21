@@ -21,6 +21,8 @@ RAG 分支只把 `rag-index.json` 交给项目脚本读取，不走 `resource-in
 
 用户明确要求开启 rerank，或需要提高 RAG 高风险主题的主题相关性时，仍走 RAG 流程，并按 [references/rag-workflow.md](references/rag-workflow.md) 的可选 rerank 规则处理外部服务、参数、日志和失败边界。
 
+用户明确要求多读材料、广泛取材，或表示不介意多花 token、希望材料尽量都看一遍时，在 Step 4 追加 `--read-scope wide`。档位规则、成本量级和配套的 facts 要求见 [references/rag-workflow.md](references/rag-workflow.md) 的「读取档位」。这是用户主动授权的加宽读取，不是默认行为：没有这类明确要求时不要自行传档位。
+
 进入 RAG 分支后读取：
 
 - [references/info-rules.md](references/info-rules.md)：路线解析、事实边界、字段取舍和城市页 include 判断。

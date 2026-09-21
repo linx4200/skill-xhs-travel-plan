@@ -358,10 +358,11 @@ B1 能力位只到检索层 + facts 层，**本轮不渲染 HTML**，报告中�
 
 | 用户说法 | 对应代码 |
 |---|---|
-| 第 1 层「配额」 | `RAG_RETRIEVAL_DEFAULTS.placeMaxThemeChunks` / `cityMaxThemeChunks` / `maxPlaceChunks` / `maxCityChunks` |
+| 第 1 层「配额」 | `RAG_RETRIEVAL_DEFAULTS.placeMaxThemeChunks` / `cityMaxThemeChunks` / `maxPlaceChunks` / `maxCityChunks`（这四个字段由 `RAG_READ_PROFILES.default` 派生，单一真源） |
 | 第 2 层「主题词表」 | `PLACE_THEMES` / `CITY_THEMES`（本轮冻结） |
 | 第 3 层「降权系数」 | `RAG_SCORING.videoTilt` / `defaultCityTilt` / `cityTiltByTheme` / `cityTierThemes` |
 | 第 4 层「rerank」 | `RAG_RERANK_DEFAULTS.enabled` / `probThreshold` / `recallWidth`；主题启用范围 = `highRiskThemes` / `allThemes` / `extraThemes`（§2.1.1） |
+| 「读取档位」（可选档，非默认值） | `RAG_READ_PROFILES` + CLI `--read-scope default\|wide`；原子配额参数仍可覆盖档位值 |
 | 阅读池 | `retrieval-workspace.json` |
 | 第 2 段（重读） | agent 读阅读池 → facts-patch → `facts-workspace.json` |
 
@@ -376,6 +377,7 @@ B1 能力位只到检索层 + facts 层，**本轮不渲染 HTML**，报告中�
 |---|---|---|---|---|
 | E1 | 2026-09-20 | facts 层补上裁定分流（`adjudication_needed` 增收「未覆盖但已召回」项） | §4.6 裁定纪律、§4.8 每轮事实层的标准作业 | `rounds/P2-2026-09-20/LOG.md` §A1 |
 | E2 | 2026-09-20 | M3 改用「证据 chunk」为单位（主计分项 `novel_evidence_chunks`） | §1.2.1 M3 的度量单位 | `rounds/P2-2026-09-20/LOG.md` §A2 |
+| E3 | 2026-09-21 | 天花板报告新增检索层 **chunk 粒度**口径（`coverage.layers.retrieval.chunk_level`），含 facts 层可写上界 | `CEILING-INTENT.md` §6.2 / §6.3 | `rounds/P3-2026-09-20/LOG.md` §A3 |
 
 > **收录口径**：判定链路的修订（度量口径、裁定分流、Gate 相关）必须记入本索引；
 > 与判定链路无关的工程改动记在 `CHANGELOG.md`。
@@ -391,6 +393,17 @@ B1 能力位只到检索层 + facts 层，**本轮不渲染 HTML**，报告中�
 | 轮次 | 日期 | 一句话结论 | 目录 |
 |---|---|---|---|
 | P2 | 2026-09-20 | 落地 `RAG_RERANK_DEFAULTS.recallWidth: 12 → 24`（按修订后 §1.3.1 判据达成） | `rounds/P2-2026-09-20/` |
+| P3 | 2026-09-20 | B3 天花板口径首次调参：配额是唯一主轴；全主题 rerank 灾难性退化。**B1 落地复核已于 09-21 补跑 → 不落地**（读量 +34.1% 超窗），默认值维持 `5/5/50/25`；该组参数改走**具名可选档位** `--read-scope wide` | `rounds/P3-2026-09-20/`（复核见 `B1-RECHECK.md`） |
+
+> **目标函数并存（重要）**：P2 按 B1（地板）判「明确优于基线」并落地；P3 按 B3（天花板）排序参数。
+> **天花板不是落地的充分理由** —— 落地默认参数前必须按 B1 复核。两套基准并存、互不取代，
+> 依据见 `CEILING-INTENT.md` §1「定位：天花板，不是地板」。
+
+> **可选档位不是默认值（2026-09-21）**：`RAG_READ_PROFILES.wide`（10/10/100/50）已落为
+> CLI 具名档位，默认档 `default` 一字未动，§1.3 判据也**未修订**。
+> 因此本评估体系的结论边界不变：**只有默认档受 §1.3 约束**；`wide` 是用户主动授权的加宽读取，
+> 不进默认值判定。在 `wide` 上做任何对比都必须在 `params` 里显式记录 `read_scope`，
+> 且默认档基线仍应能在不传档位的情况下复现。
 
 **轮次目录约定**（`rounds/<轮次目录>/`）：
 

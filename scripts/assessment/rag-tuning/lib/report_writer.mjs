@@ -185,7 +185,91 @@ function truncateText(value, max = 120) {
  * 3. 同时给「条数覆盖率」与「加权覆盖率」（critical 4 / core-quality 3 / mid 2 / low 1），
  *    后者才是「这份产出离理想还差多少」的可比分数。
  */
-export function computeCeilingCoverage({ checklist, retrievalEvaluation, factsEvaluation, htmlEvaluation }) {
+/**
+ * 检索层的 **chunk 粒度** 诊断（仅 ceiling 模式）。
+ *
+ * 为什么需要：条目级覆盖率在索引够丰富时**恒饱和** —— 一条天花板条目只要有任意 1 条证据
+ * 入池就算命中，于是同一批条目在「每主题 top-5」与「每主题 top-10」下读数相同（实测均 273/273），
+ * 失去区分度，无法用来给参数排序（违反 `CEILING-INTENT.md` §6.2「绝对值不是问题，区分度才是」）。
+ *
+ * 三个数字的口径：
+ * - `unique_evidence_chunks`：天花板要求的证据 chunk 去重后有多少条进了池（材料广度）。
+ * - `partial_credit_weighted_rate`：逐条目按「已入池证据 ÷ 该条目全部证据」给部分分，再按 criticality 加权。
+ * - `fully_evidenced_weighted_rate`：证据 **全部** 入池的条目加权占比 —— 这是 facts 层的**可写上界**：
+ *   检索层是 facts 层唯一上游，证据没进池的信息不可能被写对（写了就是幻觉）。
+ *
+ * **两套「算入池」的口径，必须显式区分**（`source` 字段说明本块用了哪一套）：
+ * - `reading_pool`（首选，需传入 `retrievalWorkspace`）：chunk 在阅读池 `chunks_by_id` 里 —— 这是
+ *   「材料广度 / agent 能否读到」的客观事实，也是天花板口径要的那个量。
+ * - `attribution`（回退，只给 `retrievalEvaluation` 时）：chunk 被「它所属条目的目标 / 主题」自己选中。
+ *   这是 B1/B2 的 CIR/N1/N2/Gate 用的**归属正确性**语义。跨目标携带的 chunk 会被它判为未召回，
+ *   实测在 t0 上低估 unique 1 条、低估 facts 可写上界 **13.0 个百分点**（65.8% vs 78.8%），
+ *   因此**不能**拿它当可写上界。回退只为兼容旧调用点与单元测试。
+ */
+function ceilingChunkLevel(retrievalEvaluation, retrievalWorkspace = null) {
+  const results = asList(retrievalEvaluation?.item_results);
+  if (!results.length) return null;
+
+  const pool = retrievalWorkspace?.chunks_by_id ?? null;
+  const source = pool ? "reading_pool" : "attribution";
+  // 回退口径下，「入池」= 至少被某条条目的目标/主题判为已召回。
+  const attributionSet = new Set();
+  for (const result of results) for (const id of asList(result.retrieved_chunk_ids)) attributionSet.add(id);
+  const isInPool = (id) => (pool ? Object.prototype.hasOwnProperty.call(pool, id) : attributionSet.has(id));
+
+  const universe = new Set();
+  const criticalUniverse = new Set();
+  const retrievedAll = new Set();
+  let weightTotal = 0;
+  let weightPartial = 0;
+  let weightFully = 0;
+  for (const result of results) {
+    const chunks = [...asList(result.retrieved_chunk_ids), ...asList(result.missing_chunk_ids)];
+    const isCritical = result.criticality === "critical";
+    const weight = CEILING_CRITICALITY_WEIGHTS[result.criticality] ?? 1;
+    let hitCount = 0;
+    for (const id of chunks) {
+      universe.add(id);
+      if (isCritical) criticalUniverse.add(id);
+      if (isInPool(id)) {
+        hitCount += 1;
+        retrievedAll.add(id);
+      }
+    }
+    weightTotal += weight;
+    if (chunks.length > 0) {
+      weightPartial += weight * (hitCount / chunks.length);
+      if (hitCount === chunks.length) weightFully += weight;
+    }
+  }
+  const hit = (set) => [...set].filter((id) => retrievedAll.has(id)).length;
+  const uniqueHit = hit(universe);
+  const criticalHit = hit(criticalUniverse);
+  return {
+    unit: "evidence_chunk",
+    source,
+    unique_evidence_chunks: {
+      total: universe.size,
+      retrieved: uniqueHit,
+      rate: ceilingRate(uniqueHit, universe.size),
+    },
+    unique_critical_evidence_chunks: {
+      total: criticalUniverse.size,
+      retrieved: criticalHit,
+      rate: ceilingRate(criticalHit, criticalUniverse.size),
+    },
+    partial_credit_weighted_rate: ceilingRate(weightPartial, weightTotal),
+    fully_evidenced_weighted_rate: ceilingRate(weightFully, weightTotal),
+  };
+}
+
+export function computeCeilingCoverage({
+  checklist,
+  retrievalEvaluation,
+  factsEvaluation,
+  htmlEvaluation,
+  retrievalWorkspace = null,
+}) {
   const items = asList(checklist?.items);
   const retrievalMap = new Map(asList(retrievalEvaluation?.item_results).map((result) => [result.item_id, result]));
   const factsMap = new Map(asList(factsEvaluation?.item_results).map((result) => [result.item_id, result]));
@@ -313,7 +397,7 @@ export function computeCeilingCoverage({ checklist, retrievalEvaluation, factsEv
     gap_weight: gapWeight,
     weighted_coverage: ceilingRate(totalWeight - gapWeight, totalWeight),
     layers: {
-      retrieval: layerBlock("retrieval"),
+      retrieval: { ...layerBlock("retrieval"), chunk_level: ceilingChunkLevel(retrievalEvaluation, retrievalWorkspace) },
       facts: layerBlock("facts"),
       render: layerBlock("render"),
     },
@@ -440,6 +524,7 @@ export function createReport({
   retrievalEvaluation,
   factsEvaluation,
   htmlEvaluation,
+  retrievalWorkspace = null,
   adjudications = null,
   deltas,
 }) {
@@ -453,7 +538,7 @@ export function createReport({
   // 天花板模式：B1/B2 的判定链路完全不动，只在这里分流。
   const ceiling = checklist?.capability === "ceiling";
   const coverage = ceiling
-    ? computeCeilingCoverage({ checklist, retrievalEvaluation, factsEvaluation, htmlEvaluation })
+    ? computeCeilingCoverage({ checklist, retrievalEvaluation, factsEvaluation, htmlEvaluation, retrievalWorkspace })
     : null;
 
   const gates = ceiling
@@ -643,6 +728,29 @@ function renderCeilingSections(coverage) {
       ? `（仅显示前 40 条；完整 ${coverage.gaps.items.length} 条见 report.json 的 \`coverage.gaps.items\`）`
       : "";
 
+  const chunkLevel = coverage.layers.retrieval?.chunk_level;
+  const chunkLines = chunkLevel
+    ? [
+        "### 检索层 chunk 粒度（跨参数组排序用）",
+        "",
+        `- 证据 chunk 去重覆盖：**${chunkLevel.unique_evidence_chunks.retrieved} / ${chunkLevel.unique_evidence_chunks.total}**` +
+          `（${formatRate(chunkLevel.unique_evidence_chunks.rate)}）；其中 critical 证据 ` +
+          `${chunkLevel.unique_critical_evidence_chunks.retrieved} / ${chunkLevel.unique_critical_evidence_chunks.total}` +
+          `（${formatRate(chunkLevel.unique_critical_evidence_chunks.rate)}）`,
+        `- 部分分加权覆盖率：**${formatRate(chunkLevel.partial_credit_weighted_rate)}**（逐条目按「已入池证据 ÷ 该条目全部证据」加权）`,
+        `- facts 层可写上界：**${formatRate(chunkLevel.fully_evidenced_weighted_rate)}**` +
+          `（证据全部入池的条目加权占比；证据未入池的信息不可能被写对，写了即幻觉）`,
+        "",
+        "条目级覆盖率在索引够丰富时会**饱和**（任一条证据入池即算命中，实测不同配额档位同为 273/273），" +
+          "不具区分度；跨参数组比较请用上面三个 chunk 粒度数字。" +
+          (chunkLevel.source === "reading_pool"
+            ? "「入池」= 该 chunk 在阅读池里（材料广度口径）。"
+            : "⚠ 本 run 未提供阅读池，回退为「归属正确性」口径 —— 跨目标携带的 chunk 会被判未召回，" +
+              "会**系统性低估** facts 可写上界（实测 t0 差 13.0 个百分点），不宜当上界用。"),
+        "",
+      ]
+    : [];
+
   return [
     "## 分层覆盖率",
     "",
@@ -653,6 +761,7 @@ function renderCeilingSections(coverage) {
     "「覆盖率」分母是全部天花板条目，衡量离理想并集有多远；「层内转化」分母只算上游已覆盖的条目，衡量这一层自己漏了多少。",
     "调 RAG 参数时只看检索层与 facts 层（检索层管材料广度、facts 层管整理效率）；呈现层受模板影响，会污染参数排序。",
     "",
+    ...chunkLines,
     "## 按 criticality 分解",
     "",
     markdownTable(criticalityRows),
